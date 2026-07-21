@@ -1,0 +1,36 @@
+{
+  "schema": "openrappter-status/1.0",
+  "package": "openrappter",
+  "rings": [
+    {
+      "ring": "canary",
+      "distTag": "canary",
+      "version": null,
+      "state": "empty"
+    },
+    {
+      "ring": "nightly",
+      "distTag": "nightly",
+      "version": null,
+      "state": "empty"
+    },
+    {
+      "ring": "alpha",
+      "distTag": "alpha",
+      "version": null,
+      "state": "empty"
+    },
+    {
+      "ring": "beta",
+      "distTag": "beta",
+      "version": null,
+      "state": "empty"
+    },
+    {
+      "ring": "stable",
+      "distTag": "latest",
+      "version": "1.9.8",
+      "state": "occupied"
+    }
+  ]
+}
