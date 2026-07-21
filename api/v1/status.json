@@ -1,34 +1,44 @@
 {
-  "schema": "openrappter-status/1.0",
-  "package": "openrappter",
+  "schema": "openrappter-status/2.0",
+  "productionPackage": "openrappter",
   "rings": [
     {
       "ring": "canary",
-      "distTag": "canary",
+      "package": "openrappter-canary",
+      "repo": "kody-w/openrappter-canary",
+      "production": false,
       "version": null,
       "state": "empty"
     },
     {
       "ring": "nightly",
-      "distTag": "nightly",
+      "package": "openrappter-nightly",
+      "repo": "kody-w/openrappter-nightly",
+      "production": false,
       "version": null,
       "state": "empty"
     },
     {
       "ring": "alpha",
-      "distTag": "alpha",
+      "package": "openrappter-alpha",
+      "repo": "kody-w/openrappter-alpha",
+      "production": false,
       "version": null,
       "state": "empty"
     },
     {
       "ring": "beta",
-      "distTag": "beta",
+      "package": "openrappter-beta",
+      "repo": "kody-w/openrappter-beta",
+      "production": false,
       "version": null,
       "state": "empty"
     },
     {
       "ring": "stable",
-      "distTag": "latest",
+      "package": "openrappter",
+      "repo": "kody-w/openrappter",
+      "production": true,
       "version": "1.9.8",
       "state": "occupied"
     }

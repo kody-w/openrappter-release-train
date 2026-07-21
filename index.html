@@ -56,7 +56,7 @@
 <body>
 <div class="wrap">
   <h1>OpenRappter Release Train</h1>
-  <p class="sub">Ship at speed on the rings; <code>latest</code> stays boring.</p>
+  <p class="sub">Every ring is its own repo and its own npm package. Production is unreachable from ring work.</p>
 
   <h2>The train</h2>
   <div class="train" id="train"></div>
@@ -66,7 +66,7 @@
 
   <h2>Install a ring</h2>
   <div class="scroll"><table>
-    <thead><tr><th>Ring</th><th>Installer</th><th>npm</th></tr></thead>
+    <thead><tr><th>Ring</th><th>Package</th><th>Repo</th><th>Installer</th></tr></thead>
     <tbody id="installs"></tbody>
   </table></div>
 
@@ -121,7 +121,7 @@ fetch('api/v1/channels.json')
       if (ring === 'stable') car.dataset.stable = 'true';
       car.innerHTML =
         `<div class="ring">${ring}</div>` +
-        `<div class="tag">@${c.distTag}</div>` +
+        `<div class="tag">${c.package}</div>` +
         `<div class="ver">${c.version
             ? c.version
             : '<span class="empty">not published</span>'}</div>` +
@@ -130,9 +130,10 @@ fetch('api/v1/channels.json')
 
       const row = document.createElement('tr');
       row.innerHTML =
-        `<td><strong>${ring}</strong></td>` +
-        `<td><code>${c.installer}</code></td>` +
-        `<td><code>${c.install}</code></td>`;
+        `<td><strong>${ring}</strong>${c.production ? ' <span class="tag">prod</span>' : ''}</td>` +
+        `<td><code>${c.package}</code></td>` +
+        `<td><a href="https://github.com/${c.repo}"><code>${c.repo}</code></a></td>` +
+        `<td><code>${c.installer}</code></td>`;
       installs.append(row);
     }
   })
