@@ -60,9 +60,10 @@
 
   <h2>The train</h2>
   <div class="train" id="train"></div>
-  <p class="note">Promotion re-points an npm dist-tag at an already published
-  version. It never rebuilds — the bytes that enter at canary are the bytes
-  that reach stable.</p>
+  <p class="note">Promotion republishes the identical tarball under the next
+  ring's package name. It never rebuilds — the bytes that enter at canary are
+  the bytes that reach stable. Only a real release ever writes
+  <code>openrappter</code>.</p>
 
   <h2>Install a ring</h2>
   <div class="scroll"><table>
@@ -75,15 +76,17 @@
 curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel beta
 </code></pre>
   <p class="note">Your ring is remembered in <code>~/.openrappter/channel</code>,
-  so later upgrades stay on the same train car. An exact
-  <code>OPENRAPPTER_VERSION</code> always wins over the ring.</p>
+  so later upgrades stay on the same train car. A version pin applies
+  <em>within</em> the selected ring — <code>OPENRAPPTER_VERSION=1.9.8</code> with
+  <code>--channel canary</code> resolves <code>openrappter-canary@1.9.8</code>,
+  never the production package.</p>
 
   <h2>Static API</h2>
   <div class="scroll"><table>
     <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
     <tbody>
       <tr><td><a href="api/v1/channels.json"><code>api/v1/channels.json</code></a></td>
-          <td>Ring → dist-tag → version, plus install commands</td></tr>
+          <td>Ring → package → repo → version, plus install commands</td></tr>
       <tr><td><a href="api/v1/registry.json"><code>api/v1/registry.json</code></a></td>
           <td>Train topology and source repo</td></tr>
       <tr><td><a href="api/v1/status.json"><code>api/v1/status.json</code></a></td>
@@ -104,7 +107,7 @@ const BLURB = {
   nightly: "Daily, when main moved",
   alpha:   "Hand-promoted from nightly",
   beta:    "Hand-promoted from alpha",
-  stable:  "Released; owns latest",
+  stable:  "Released; the production package",
 };
 
 fetch('api/v1/channels.json')
