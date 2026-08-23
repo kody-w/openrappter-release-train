@@ -23,6 +23,7 @@ RELEASE_KEYS = {
     "schema", "mode", "source_commit", "source_tag", "version",
     "artifact_url", "install_url", "artifact_sha256",
     "artifact_provenance", "rollback_receipt",
+    "channel_tag",
 }
 
 
@@ -70,7 +71,7 @@ def validate_release(value: object) -> dict:
 
 def _identity(value: dict) -> tuple:
     return (
-        value["source_commit"], value["source_tag"], value["version"],
+        value["source_commit"], value["version"],
         value["artifact_url"], value["install_url"], value["artifact_sha256"],
         value["artifact_provenance"],
     )
@@ -90,6 +91,7 @@ def validate_chain(
     expected_identity = _identity(value)
     previous_manifest: dict | None = None
     previous_time: dt.datetime | None = None
+    channel_tag = value["channel_tag"]
     seen_ids: set[str] = set()
     for ring, item in zip(ORDER, chain):
         if set(item) != {
@@ -117,6 +119,10 @@ def validate_chain(
             raise ConstitutionError(str(exc)) from exc
         if receipt["receipt_kind"] != "promotion":
             raise ConstitutionError(f"{ring} is not finalized by a promotion receipt")
+        if not channel_tag:
+            channel_tag = receipt["source_tag"]
+        if receipt["source_tag"] != channel_tag:
+            raise ConstitutionError(f"{ring} channel tag identity mismatch")
         if manifest["status"] != "published":
             raise ConstitutionError(f"{ring} is pending or disabled")
         if _identity({
@@ -218,12 +224,12 @@ def discover_artifact(release: dict) -> dict:
     if not (
         receipt.get("receipt_kind") == "promotion"
         and receipt.get("source_commit") == release["source_commit"]
-        and receipt.get("source_tag") == release["source_tag"]
         and receipt.get("version") == release["version"]
         and digest(receipt) == head["receipt_sha256"]
     ):
         raise ConstitutionError("latest finalized beta artifact does not match release identity")
     result = dict(release)
+    result["channel_tag"] = receipt["source_tag"]
     for target, source in (
         ("artifact_url", "artifact_url"),
         ("install_url", "install_url"),
@@ -256,9 +262,9 @@ def verify_candidate_bytes(release: dict, local_dir: Path) -> None:
         provenance = json.loads((extracted / "provenance.json").read_text())
         if (
             provenance.get("candidate_kind") != "release"
-            or provenance.get("release_tag") != release["source_tag"]
+            or provenance.get("release_tag") != release["channel_tag"]
             or provenance.get("source_commit") != release["source_commit"]
-            or provenance.get("version") != release["version"]
+            or provenance.get("versions", {}).get("npm") != release["version"]
         ):
             raise ConstitutionError("snapshot or mismatched candidate cannot be distributed")
         matched = []
@@ -337,7 +343,8 @@ def verify_pages(
             or provenance["candidate_kind"] != "release"
             or provenance["release_tag"] != receipt["source_tag"]
             or provenance["source_commit"] != receipt["source_commit"]
-            or provenance["version"] != receipt["version"]
+            or provenance["versions"]["npm"] != receipt["version"]
+            or provenance["versions"]["channel"] != receipt["source_tag"].removeprefix("v")
         ):
             raise ConstitutionError("candidate provenance/tag identity mismatch")
         for name in ("install.sh", "install.ps1"):

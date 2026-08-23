@@ -49,16 +49,24 @@ It never writes the nightly repository and never requests alpha or later.
 
 Immediately after a release-relevant merge:
 
+The generated helper reads live package manifests, request indexes, authority
+heads, and immutable acknowledgement paths instead of copying IDs:
+
+```sh
+./scripts/release-ring-journey.sh --channel-version 0.1.0-beta.11
+```
+
 ```sh
 candidate_commit="$(gh api repos/kody-w/openrappter/commits/main --jq .sha)"
 gh workflow run build-candidate.yml -R kody-w/openrappter \
   -f source_commit="$candidate_commit" \
-  -f version=0.1.0-beta.11 \
+  -f channel_version=0.1.0-beta.11 \
   -f release_tag=v0.1.0-beta.11 \
   -f candidate_kind=release
 gh run watch -R kody-w/openrappter \
   "$(gh run list -R kody-w/openrappter --workflow build-candidate.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
-gh workflow run observe-main.yml -R kody-w/openrappter-release-train
+gh workflow run observe-main.yml -R kody-w/openrappter-release-train \
+  -f candidate_kind=release -f candidate_id=v0.1.0-beta.11
 gh run watch -R kody-w/openrappter-release-train \
   "$(gh run list -R kody-w/openrappter-release-train --workflow observe-main.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 
@@ -85,8 +93,8 @@ Promote the chosen finalized beta.11 snapshot explicitly, one ring at a time:
 set -- nightly alpha
 source_ring="$1"; target_ring="$2"
 source_repo="kody-w/openrappter-$source_ring"
-applied="$(gh api "repos/$source_repo/contents/.ring/applied.json?ref=main" --jq .content | base64 --decode)"
-source_commit="$(printf '%s' "$applied" | jq -r .target_manifest_commit)"
+source_head="$(gh api "repos/kody-w/openrappter-release-train/contents/heads/$source_ring.json" --jq .content | base64 --decode)"
+source_commit="$(printf '%s' "$source_head" | jq -r .target_manifest_commit)"
 source_url="https://raw.githubusercontent.com/$source_repo/$source_commit/.ring/manifest.json"
 
 gh workflow run request-promotion.yml -R kody-w/openrappter-release-train \

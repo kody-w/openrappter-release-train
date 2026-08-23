@@ -10,6 +10,7 @@ from observe_main import (  # noqa: E402
     ObservationError,
     build_request,
     candidate_fields,
+    select_candidate,
     nightly_request_id,
     verify_green_head,
 )
@@ -122,17 +123,19 @@ class ObserveMainTests(unittest.TestCase):
                 "channel": "candidate",
                 "stable": False,
                 "candidate_kind": "release",
+                "candidate_id": "v2.0.0",
                 "release_tag": "v2.0.0",
                 "source_commit": self.head,
-                "version": "2.0.0",
+                "versions": {"npm": "2.0.0", "pypi": "2.0.0", "runtime": "2.0.0", "channel": "2.0.0"},
             }
             (work / "provenance.json").write_text(json.dumps(provenance))
-            (work / "bundles.txt").write_text(f"{'c' * 64}.tar.gz\nprovenance.json\n")
+            entry = {"id": "v2.0.0", "bundle_sha256": "c" * 64, "path": f"candidates/{self.head}/release/v2.0.0", "provenance_path": "unused", "source_date_epoch": 1}
+            (work / "entry.json").write_text(json.dumps(entry))
             result = subprocess.run(
                 [
                     sys.executable, str(ROOT / "scripts/observe_main.py"), "candidate",
                     "--provenance", str(work / "provenance.json"),
-                    "--bundle-list", str(work / "bundles.txt"),
+                    "--entry", str(work / "entry.json"),
                     "--head", self.head, "--candidate-commit", "b" * 40,
                 ],
                 text=True, capture_output=True, check=True,
@@ -150,19 +153,29 @@ class ObserveMainTests(unittest.TestCase):
             "channel": "candidate",
             "stable": False,
             "candidate_kind": "snapshot",
+            "candidate_id": "snapshot-1",
             "release_tag": None,
             "source_commit": self.head,
-            "version": "2.0.0",
+            "versions": {"npm": "2.0.0", "pypi": "2.0.0", "runtime": "2.0.0", "channel": "snapshot"},
         }
-        with self.assertRaisesRegex(ObservationError, "exactly one"):
-            candidate_fields(provenance, [], self.head, "b" * 40)
-        with self.assertRaisesRegex(ObservationError, "exactly one"):
-            candidate_fields(
-                provenance,
-                [f"{'c' * 64}.tar.gz", f"{'d' * 64}.tar.gz"],
-                self.head,
-                "b" * 40,
-            )
+        with self.assertRaisesRegex(ObservationError, "malformed"):
+            candidate_fields(provenance, {"id": "snapshot-1", "bundle_sha256": "", "path": f"candidates/{self.head}/snapshot/snapshot-1"}, self.head, "b" * 40)
+
+    def test_same_commit_snapshot_and_release_selection_is_explicit(self):
+        index = {
+            "schema": "openrappter-candidate-index/v1",
+            "source_commit": self.head,
+            "snapshots": [
+                {"id": "s1", "source_date_epoch": 1},
+                {"id": "s2", "source_date_epoch": 2},
+            ],
+            "releases": [{"id": "v0.1.0-beta.11", "source_date_epoch": 1}],
+        }
+        self.assertEqual(select_candidate(index, "snapshot", None)["id"], "s2")
+        self.assertEqual(select_candidate(index, "snapshot", "s1")["id"], "s1")
+        self.assertEqual(select_candidate(index, "release", "v0.1.0-beta.11")["id"], "v0.1.0-beta.11")
+        with self.assertRaisesRegex(ObservationError, "not found"):
+            select_candidate(index, "release", "missing")
 
 
 if __name__ == "__main__":

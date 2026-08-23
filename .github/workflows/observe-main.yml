@@ -1,6 +1,15 @@
 name: Observe canonical main for nightly
 on:
   workflow_dispatch:
+    inputs:
+      candidate_kind:
+        type: choice
+        options: [snapshot, release]
+        default: snapshot
+      candidate_id:
+        description: Required for explicit release; optional exact snapshot ID
+        required: false
+        type: string
   schedule: [{ cron: '7,37 * * * *' }]
 permissions:
   contents: write
@@ -22,17 +31,24 @@ jobs:
             -H "Accept: application/vnd.github+json" > checks.json
           python scripts/observe_main.py verify --checks checks.json --head "$head" \
             --policy config/required-main-checks.json
-          candidate_path="candidates/$head/provenance.json"
-          candidate_commit="$(gh api "repos/kody-w/openrappter/commits?sha=candidates&path=$candidate_path&per_page=1" --jq '.[0].sha')"
+          kind="${{ inputs.candidate_kind || 'snapshot' }}"
+          candidate_id="${{ inputs.candidate_id }}"
+          index_path="candidates/$head/index.json"
+          candidate_commit="$(gh api "repos/kody-w/openrappter/commits?sha=candidates&path=$index_path&per_page=1" --jq '.[0].sha')"
           printf '%s' "$candidate_commit" | grep -Eq '^[0-9a-f]{40}$'
           curl -fsSL --proto '=https' \
-            "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$candidate_path" \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$index_path" \
+            -o candidate-index.json
+          select_args=(--index candidate-index.json --kind "$kind")
+          if [ -n "$candidate_id" ]; then select_args+=(--candidate-id "$candidate_id"); fi
+          python scripts/observe_main.py select-candidate "${select_args[@]}" > candidate-entry.json
+          provenance_path="$(python -c 'import json; print(json.load(open("candidate-entry.json"))["provenance_path"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$provenance_path" \
             -o provenance.json
-          gh api "repos/kody-w/openrappter/contents/candidates/$head?ref=$candidate_commit" \
-            --jq '.[].name' > bundle-list.txt
           IFS=$'\t' read -r package_version candidate_kind release_tag artifact_url <<< "$(
             python scripts/observe_main.py candidate --provenance provenance.json \
-              --bundle-list bundle-list.txt --head "$head" --candidate-commit "$candidate_commit"
+              --entry candidate-entry.json --head "$head" --candidate-commit "$candidate_commit"
           )"
           if [ "$release_tag" = "-" ]; then release_tag=""; fi
           artifact_sha="$(basename "$artifact_url" .tar.gz)"
