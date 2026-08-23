@@ -68,9 +68,9 @@ def nightly_request_id(
         "tag": None,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": None,
+        "install_url": artifact_url,
         "artifact_sha256": artifact_sha256,
-        "artifact_provenance": "github-commit-archive-sha256",
+        "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": promoted_at,
     }
     seed = {
@@ -82,9 +82,9 @@ def nightly_request_id(
         "source_tag": None,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": None,
+        "install_url": artifact_url,
         "artifact_sha256": artifact_sha256,
-        "artifact_provenance": "github-commit-archive-sha256",
+        "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": promoted_at,
         "predecessor_manifest_sha256": digest(source_identity),
     }
@@ -96,16 +96,15 @@ def build_request(
     head: str,
     package_version: str,
     committed_at: str,
+    artifact_url: str,
     artifact_sha256: str,
     previous_manifest: dict,
     target_base_commit: str,
+    sequence: int,
 ) -> dict:
     validate_manifest(previous_manifest, expected_ring="nightly")
-    parsed = dt.datetime.fromisoformat(committed_at.replace("Z", "+00:00"))
-    stamp = parsed.astimezone(dt.timezone.utc).strftime("%Y%m%d")
-    core = package_version.split("-", 1)[0]
-    version = f"{core}-nightly.{stamp}+g{head[:8]}"
-    artifact_url = f"https://github.com/kody-w/openrappter/archive/{head}.tar.gz"
+    dt.datetime.fromisoformat(committed_at.replace("Z", "+00:00"))
+    version = package_version
     promotion_id = nightly_request_id(
         head=head,
         version=version,
@@ -119,9 +118,9 @@ def build_request(
         "tag": None,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": None,
+        "install_url": artifact_url,
         "artifact_sha256": artifact_sha256,
-        "artifact_provenance": "github-commit-archive-sha256",
+        "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": committed_at,
     }
     target_manifest = {
@@ -135,19 +134,20 @@ def build_request(
         "version": version,
         "artifact": {
             "url": artifact_url,
-            "install_url": None,
+            "install_url": artifact_url,
             "sha256": artifact_sha256,
-            "provenance": "github-commit-archive-sha256",
+            "provenance": "github-candidate-bundle-sha256",
         },
         "promoted_at": committed_at,
         "predecessor": None,
-        "status": "unpublished",
-        "reason": "CI-verified canonical main snapshot; no installable nightly package is claimed.",
+        "status": "published",
+        "reason": None,
         "receipt": None,
         "promotion_id": promotion_id,
     }
     request = {
         "schema": "openrappter-promotion/v1",
+        "sequence": sequence,
         "promotion_id": promotion_id,
         "from": None,
         "to": "nightly",
@@ -160,9 +160,9 @@ def build_request(
         "source_tag": None,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": None,
+        "install_url": artifact_url,
         "artifact_sha256": artifact_sha256,
-        "artifact_provenance": "github-commit-archive-sha256",
+        "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": committed_at,
         "predecessor_manifest_sha256": digest(source_identity),
         "target_manifest": target_manifest,
@@ -181,8 +181,8 @@ def main() -> int:
     verify.add_argument("--policy", required=True)
     build = sub.add_parser("build")
     for name in (
-        "head", "package-version", "committed-at", "artifact-sha256",
-        "previous-manifest", "target-base-commit", "output",
+        "head", "package-version", "committed-at", "artifact-url", "artifact-sha256",
+        "previous-manifest", "target-base-commit", "sequence", "output",
     ):
         build.add_argument(f"--{name}", required=True)
     args = parser.parse_args()
@@ -198,9 +198,11 @@ def main() -> int:
                 head=args.head,
                 package_version=args.package_version,
                 committed_at=args.committed_at,
+                artifact_url=args.artifact_url,
                 artifact_sha256=args.artifact_sha256,
                 previous_manifest=json.loads(Path(args.previous_manifest).read_text()),
                 target_base_commit=args.target_base_commit,
+                sequence=int(args.sequence),
             )
             Path(args.output).write_bytes(
                 json.dumps(request, indent=2, sort_keys=True).encode() + b"\n"

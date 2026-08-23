@@ -85,6 +85,7 @@ def acknowledge(args: argparse.Namespace) -> None:
     ack = {
         "schema": "openrappter-applied-request/v1",
         "request_id": request["promotion_id"],
+        "request_sequence": request["sequence"],
         "request_sha256": digest(request),
         "request_authority_commit": args.request_commit,
         "request_path": args.request_path,

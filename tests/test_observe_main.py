@@ -58,9 +58,14 @@ class ObserveMainTests(unittest.TestCase):
             "head": self.head,
             "package_version": "2.0.0",
             "committed_at": "2026-08-23T20:00:00Z",
+            "artifact_url": (
+                f"https://raw.githubusercontent.com/kody-w/openrappter/"
+                f"{'b' * 40}/candidates/{self.head}/{'c' * 64}.tar.gz"
+            ),
             "artifact_sha256": "c" * 64,
             "previous_manifest": self.previous,
             "target_base_commit": "d" * 40,
+            "sequence": 1,
         }
         first = build_request(**kwargs)
         second = build_request(**kwargs)
@@ -68,8 +73,8 @@ class ObserveMainTests(unittest.TestCase):
         self.assertEqual(first["promotion_id"], first["target_manifest"]["promotion_id"])
         expected = nightly_request_id(
             head=self.head,
-            version="2.0.0-nightly.20260823+gaaaaaaaa",
-            artifact_url=f"https://github.com/kody-w/openrappter/archive/{self.head}.tar.gz",
+            version="2.0.0",
+            artifact_url=kwargs["artifact_url"],
             artifact_sha256="c" * 64,
             promoted_at="2026-08-23T20:00:00Z",
         )
@@ -83,6 +88,7 @@ class ObserveMainTests(unittest.TestCase):
             "install_url", "artifact_sha256", "artifact_provenance",
             "promoted_at", "predecessor_manifest_sha256", "target_manifest",
             "target_manifest_sha256",
+            "sequence",
         })
         self.assertEqual(first["target_previous_manifest_sha256"], digest(self.previous))
         self.assertEqual(first["target_previous_source_commit"], self.previous["source"]["commit"])
@@ -91,13 +97,15 @@ class ObserveMainTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/observe-main.yml").read_text()
         first_read = workflow.index('head="$(gh api repos/kody-w/openrappter/commits/main')
         exact_check = workflow.index('test "$(gh api repos/kody-w/openrappter/commits/main')
-        write = workflow.index('--method PUT')
+        write = workflow.index('git push origin HEAD:main')
         self.assertLess(first_read, exact_check)
         self.assertLess(exact_check, write)
         self.assertNotIn("repository_dispatch", workflow)
         self.assertNotIn("secrets.", workflow)
         self.assertIn("observe_main.py build", workflow)
         self.assertNotIn("client_payload", workflow)
+        self.assertIn("heads/nightly.json", workflow)
+        self.assertNotIn("openrappter-nightly/commits/main", workflow)
 
 
 if __name__ == "__main__":

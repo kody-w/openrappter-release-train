@@ -7,7 +7,10 @@ import argparse
 import datetime as dt
 import json
 import re
+import hashlib
+import shutil
 import sys
+import tarfile
 import urllib.request
 from pathlib import Path
 
@@ -229,6 +232,47 @@ def discover_artifact(release: dict) -> dict:
     return result
 
 
+def verify_candidate_bytes(release: dict, local_dir: Path) -> None:
+    if release["artifact_provenance"] != "github-candidate-bundle-sha256":
+        raise ConstitutionError("finalized beta artifact is not an immutable candidate bundle")
+    bundle = local_dir / ".constitution-candidate.tar.gz"
+    extracted = local_dir / ".constitution-candidate"
+    shutil.rmtree(extracted, ignore_errors=True)
+    extracted.mkdir()
+    try:
+        with urllib.request.urlopen(release["artifact_url"]) as response:
+            bundle.write_bytes(response.read())
+        actual = hashlib.sha256(bundle.read_bytes()).hexdigest()
+        if actual != release["artifact_sha256"]:
+            raise ConstitutionError("candidate bundle digest mismatch")
+        with tarfile.open(bundle, "r:gz") as archive:
+            for member in archive.getmembers():
+                resolved = (extracted / member.name).resolve()
+                if extracted.resolve() not in resolved.parents and resolved != extracted.resolve():
+                    raise ConstitutionError("candidate archive path traversal")
+            archive.extractall(extracted, filter="data")
+        provenance = json.loads((extracted / "provenance.json").read_text())
+        matched = []
+        for row in provenance["files"]:
+            name = row["path"]
+            candidate = extracted / name
+            local = local_dir / name
+            if not local.exists():
+                continue
+            matched.append(name)
+            if hashlib.sha256(local.read_bytes()).hexdigest() != row["sha256"]:
+                raise ConstitutionError(f"published artifact {name} differs from finalized candidate")
+        if (
+            not any(name.endswith(".tgz") for name in matched)
+            or not any(name.endswith(".whl") for name in matched)
+            or not any(name.endswith(".tar.gz") for name in matched)
+        ):
+            raise ConstitutionError("release job did not present npm, wheel, and sdist candidate bytes")
+    finally:
+        bundle.unlink(missing_ok=True)
+        shutil.rmtree(extracted, ignore_errors=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", required=True)
@@ -236,15 +280,15 @@ def main() -> int:
     parser.add_argument("--chain")
     parser.add_argument("--remote", action="store_true")
     parser.add_argument("--discover-artifact", action="store_true")
-    parser.add_argument("--local-artifact-sha")
+    parser.add_argument("--local-artifacts-dir")
     args = parser.parse_args()
     try:
         policy = load_policy(Path(args.policy))
         release = json.loads(Path(args.release).read_text())
         if args.discover_artifact:
             release = discover_artifact(release)
-        if args.local_artifact_sha and release.get("artifact_sha256") != args.local_artifact_sha:
-            raise ConstitutionError("locally built artifact checksum differs from finalized beta artifact")
+        if args.local_artifacts_dir:
+            verify_candidate_bytes(release, Path(args.local_artifacts_dir))
         chain = fetch_chain(release) if args.remote else json.loads(Path(args.chain).read_text())
         validate_chain(release, chain, policy)
         print("Release Constitution: exact finalized chain verified")

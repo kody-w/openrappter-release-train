@@ -186,7 +186,7 @@ class RingAuthorityTests(unittest.TestCase):
         ack_args = Args()
         ack_args.request = str(payload_path)
         ack_args.request_commit = "1" * 40
-        ack_args.request_path = f"requests/alpha/{payload['promotion_id']}.json"
+        ack_args.request_path = f"requests/alpha/{payload['sequence']:020d}-{payload['promotion_id']}.json"
         ack_args.current = str(current_path)
         ack_args.target_manifest_commit = target_commit
         ack_args.output = str(ack_path)
@@ -236,9 +236,10 @@ class RingAuthorityTests(unittest.TestCase):
         ack = {
             "schema": "openrappter-applied-request/v1",
             "request_id": payload["promotion_id"],
+            "request_sequence": payload["sequence"],
             "request_sha256": digest(payload),
             "request_authority_commit": "1" * 40,
-            "request_path": f"requests/alpha/{payload['promotion_id']}.json",
+            "request_path": f"requests/alpha/{payload['sequence']:020d}-{payload['promotion_id']}.json",
             "target_repository": payload["target_repository"],
             "target_ring": "alpha",
             "target_manifest_sha256": digest(manifest),
@@ -268,6 +269,15 @@ class RingAuthorityTests(unittest.TestCase):
         replay, changed = make_head(receipt_value, existing=head, **kwargs)
         self.assertFalse(changed)
         self.assertEqual(replay, head)
+        conflicting = {**receipt_value, "promotion_id": "9" * 64}
+        with self.assertRaisesRegex(ManifestError, "previous receipt"):
+            make_head(
+                conflicting,
+                authority_commit="4" * 40,
+                receipt_path=f"receipts/alpha/{'9' * 64}.json",
+                receipt_sha256=digest(conflicting),
+                existing=head,
+            )
 
     def test_finalize_validates_application_before_existing_receipt_success(self):
         workflow = (ROOT / ".github/workflows/finalize-promotion.yml").read_text()

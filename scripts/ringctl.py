@@ -41,7 +41,7 @@ PAYLOAD_KEYS = {
     "source_tag", "version", "artifact_url", "install_url",
     "artifact_sha256", "artifact_provenance", "promoted_at",
     "predecessor_manifest_sha256", "target_manifest",
-    "target_manifest_sha256",
+    "target_manifest_sha256", "sequence",
 }
 
 
@@ -154,7 +154,17 @@ def validate_artifact(artifact: object, version: str, tag: str | None, status: s
         and github_release is not None
         and github_release.fullmatch(url)
     )
-    if not (npm_ok or release_ok):
+    candidate_ok = (
+        provenance == "github-candidate-bundle-sha256"
+        and isinstance(url, str)
+        and install_url == url
+        and re.fullmatch(
+            rf"https://raw\.githubusercontent\.com/kody-w/openrappter/"
+            rf"[0-9a-f]{{40}}/candidates/[0-9a-f]{{40}}/{re.escape(sha)}\.tar\.gz",
+            url,
+        )
+    )
+    if not (npm_ok or release_ok or candidate_ok):
         raise ManifestError("published artifact URL is not bound to canonical npm version or GitHub release tag")
     return value
 
@@ -226,6 +236,7 @@ def validate_promotion(
     previous_target: dict,
     checkout: Path,
     target_base_commit: str,
+    sequence: int = 1,
 ) -> dict:
     validate_manifest(source)
     validate_manifest(previous_target, expected_ring=target_ring)
@@ -294,6 +305,7 @@ def validate_promotion(
     validate_manifest(target_manifest, expected_ring=target_ring)
     payload = {
         "schema": "openrappter-promotion/v1",
+        "sequence": sequence,
         "promotion_id": promotion_id,
         **seed,
         "target_manifest": target_manifest,
@@ -382,7 +394,7 @@ RECEIPT_KEYS = {
 APPLIED_KEYS = {
     "schema", "request_id", "request_sha256", "request_authority_commit",
     "request_path", "target_repository", "target_ring",
-    "target_manifest_sha256", "target_manifest_commit",
+    "target_manifest_sha256", "target_manifest_commit", "request_sequence",
 }
 HEAD_KEYS = {
     "schema", "ring", "sequence", "promotion_id", "authority_commit",
@@ -438,6 +450,7 @@ def validate_applied(request: object, applied: object, target_manifest: object) 
         raise ManifestError("unknown applied acknowledgement schema")
     if (
         ack["request_id"] != payload["promotion_id"]
+        or ack["request_sequence"] != payload["sequence"]
         or ack["request_sha256"] != digest(payload)
         or ack["target_repository"] != payload["target_repository"]
         or ack["target_ring"] != payload["to"]
@@ -450,7 +463,10 @@ def validate_applied(request: object, applied: object, target_manifest: object) 
         raise ManifestError("target applied acknowledgement does not match request")
     if not isinstance(ack["request_authority_commit"], str) or not HEX40.fullmatch(ack["request_authority_commit"]):
         raise ManifestError("request authority commit is mutable")
-    expected_path = f"requests/{payload['to']}/{payload['promotion_id']}.json"
+    expected_path = (
+        f"requests/{payload['to']}/{payload['sequence']:020d}-"
+        f"{payload['promotion_id']}.json"
+    )
     if ack["request_path"] != expected_path:
         raise ManifestError("applied acknowledgement request path mismatch")
     return ack
@@ -463,6 +479,8 @@ def make_head(
     receipt_path: str,
     receipt_sha256: str,
     existing: object | None = None,
+    previous_receipt: object | None = None,
+    checkout: Path | None = None,
 ) -> tuple[dict, bool]:
     value = _closed(receipt, RECEIPT_KEYS, "receipt")
     ring = value["target_ring"]
@@ -490,6 +508,17 @@ def make_head(
             if old != expected:
                 raise ManifestError("existing authority head conflicts with finalized receipt")
             return old, False
+        if previous_receipt is None or checkout is None:
+            raise ManifestError("advancing authority head requires previous receipt and canonical checkout")
+        previous = _closed(previous_receipt, RECEIPT_KEYS, "previous receipt")
+        if previous["promotion_id"] != old["promotion_id"]:
+            raise ManifestError("previous receipt does not match current authority head")
+        if compare_semver(value["version"], previous["version"]) < 0:
+            raise ManifestError("authority head version would move backwards")
+        _git(checkout, "merge-base", "--is-ancestor", previous["source_commit"], value["source_commit"])
+        for field in ("artifact_url", "artifact_sha256", "artifact_provenance"):
+            if not value.get(field):
+                raise ManifestError(f"new receipt lacks {field}")
         sequence = old["sequence"] + 1
     else:
         sequence = 1
@@ -541,6 +570,7 @@ def main() -> int:
     promote.add_argument("--previous", required=True)
     promote.add_argument("--checkout", required=True)
     promote.add_argument("--target-base-commit", required=True)
+    promote.add_argument("--sequence", required=True, type=int)
     receipt = sub.add_parser("receipt")
     receipt.add_argument("payload")
     receipt.add_argument("--target-manifest-commit", required=True)
@@ -556,6 +586,8 @@ def main() -> int:
     for name in ("receipt", "authority-commit", "receipt-path", "receipt-sha256", "out"):
         head_parser.add_argument(f"--{name}", required=True)
     head_parser.add_argument("--existing")
+    head_parser.add_argument("--previous-receipt")
+    head_parser.add_argument("--checkout")
     args = parser.parse_args()
     try:
         if args.command == "validate":
@@ -584,6 +616,8 @@ def main() -> int:
                 receipt_path=args.receipt_path,
                 receipt_sha256=args.receipt_sha256,
                 existing=load(args.existing) if args.existing else None,
+                previous_receipt=load(args.previous_receipt) if args.previous_receipt else None,
+                checkout=Path(args.checkout) if args.checkout else None,
             )
             with open(args.out, "w", encoding="utf-8") as handle:
                 json.dump(value, handle, indent=2, sort_keys=True)
@@ -596,6 +630,7 @@ def main() -> int:
                 previous_target=load(args.previous),
                 checkout=Path(args.checkout),
                 target_base_commit=args.target_base_commit,
+                sequence=args.sequence,
             )
             print(json.dumps(payload, sort_keys=True))
         else:
@@ -618,3 +653,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+    if not isinstance(value["sequence"], int) or value["sequence"] < 1:
+        raise ManifestError("request sequence must be a positive integer")

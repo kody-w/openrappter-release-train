@@ -22,33 +22,49 @@ jobs:
             -H "Accept: application/vnd.github+json" > checks.json
           python scripts/observe_main.py verify --checks checks.json --head "$head" \
             --policy config/required-main-checks.json
-          package_version="$(gh api "repos/kody-w/openrappter/contents/typescript/package.json?ref=$head" --jq .content | base64 --decode | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
-          artifact_url="https://github.com/kody-w/openrappter/archive/$head.tar.gz"
-          curl -fsSL --proto '=https' "$artifact_url" -o source.tar.gz
-          artifact_sha="$(sha256sum source.tar.gz | cut -d' ' -f1)"
-          target_head="$(gh api repos/kody-w/openrappter-nightly/commits/main --jq .sha)"
+          candidate_path="candidates/$head/provenance.json"
+          candidate_commit="$(gh api "repos/kody-w/openrappter/commits?sha=candidates&path=$candidate_path&per_page=1" --jq '.[0].sha')"
+          printf '%s' "$candidate_commit" | grep -Eq '^[0-9a-f]{40}$'
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$candidate_path" \
+            -o provenance.json
+          read -r package_version artifact_sha <<EOF
+          $(python - "$head" <<'PY'
+          import json,sys
+          p=json.load(open("provenance.json"))
+          assert p["schema"]=="openrappter-candidate-provenance/v1" and p["channel"]=="candidate" and p["stable"] is False
+          assert p["source_commit"]==sys.argv[1]
+          print(p["version"],end=" ")
+          PY
+          )
+          $(gh api "repos/kody-w/openrappter/contents/candidates/$head?ref=$candidate_commit" --jq '.[]|select(.name|endswith(".tar.gz"))|.name' | sed -E 's/\.tar\.gz$//')
+          EOF
+          printf '%s' "$artifact_sha" | grep -Eq '^[0-9a-f]{64}$'
+          artifact_url="https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/candidates/$head/$artifact_sha.tar.gz"
+          curl -fsSL --proto '=https' "$artifact_url" -o candidate.tar.gz
+          echo "$artifact_sha  candidate.tar.gz" | sha256sum -c -
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/nightly.json" \
+            -o target-head.json
+          target_head="$(python -c 'import json; print(json.load(open("target-head.json"))["target_manifest_commit"])')"
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/kody-w/openrappter-nightly/$target_head/.ring/manifest.json" \
             -o previous.json
           request_id="$(python scripts/observe_main.py build \
             --head "$head" --package-version "$package_version" \
-            --committed-at "$committed_at" --artifact-sha256 "$artifact_sha" \
+            --committed-at "$committed_at" --artifact-url "$artifact_url" \
+            --artifact-sha256 "$artifact_sha" \
             --previous-manifest previous.json --target-base-commit "$target_head" \
-            --output request.json)"
-          request_path="requests/nightly/$request_id.json"
-          if gh api "repos/kody-w/openrappter-release-train/contents/$request_path?ref=main" \
-              --jq .content 2>/dev/null | base64 --decode > existing.json; then
-            python - <<'PY'
-          import json
-          assert json.load(open("existing.json")) == json.load(open("request.json"))
-          PY
-            echo "verified head already requested: $head"
-            exit 0
-          fi
+            --sequence 1 --output request.json)"
           # Re-read main immediately before committing the request. A newer
           # commit must be observed and checked on the next run.
           test "$(gh api repos/kody-w/openrappter/commits/main --jq .sha)" = "$head"
-          content="$(base64 < request.json | tr -d '\n')"
-          gh api "repos/kody-w/openrappter-release-train/contents/$request_path" \
-            --method PUT -f "message=request: nightly verified $head" \
-            -f content="$content" -f branch=main
+          queue="$(python scripts/request_queue.py enqueue --root . --request request.json)"
+          changed="$(printf '%s' "$queue" | python -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
+          if [ "$changed" = false ]; then echo "verified head already queued: $head"; exit 0; fi
+          path="$(printf '%s' "$queue" | python -c 'import json,sys; print(json.load(sys.stdin)["path"])')"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$path" request-index/nightly.json
+          git commit -m "request: nightly verified $head"
+          git push origin HEAD:main

@@ -37,8 +37,13 @@ jobs:
           EOF
           curl -fsSL --proto '=https' "$SOURCE_URL" -o source.json
           promotion_id="$(python -c 'import json; print(json.load(open("source.json"))["promotion_id"])')"
-          receipt_path="receipts/$source_ring/$promotion_id.json"
-          receipt_commit="$(gh api "repos/kody-w/openrappter-release-train/commits?path=$receipt_path&per_page=1" --jq '.[0].sha')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/$source_ring.json" \
+            -o source-head.json
+          receipt_path="$(python -c 'import json; print(json.load(open("source-head.json"))["receipt_path"])')"
+          receipt_commit="$(python -c 'import json; print(json.load(open("source-head.json"))["authority_commit"])')"
+          test "$(python -c 'import json; print(json.load(open("source-head.json"))["promotion_id"])')" = "$promotion_id"
+          test "$(python -c 'import json; print(json.load(open("source-head.json"))["target_manifest_commit"])')" = "$source_ref"
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$receipt_commit/$receipt_path" \
             -o source-receipt.json
@@ -54,26 +59,23 @@ jobs:
           print("kody-w/openrappter" if sys.argv[1]=="stable" else f"kody-w/openrappter-{sys.argv[1]}")
           PY
           )"
-          target_head="$(gh api "repos/$target_repo/commits/main" --jq .sha)"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/$TARGET_RING.json" \
+            -o target-head.json
+          target_head="$(python -c 'import json; print(json.load(open("target-head.json"))["target_manifest_commit"])')"
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/$target_repo/$target_head/.ring/manifest.json" \
             -o previous.json
           git clone --filter=blob:none https://github.com/kody-w/openrappter.git canonical
           python scripts/ringctl.py promote source.json --to "$TARGET_RING" \
             --previous previous.json --checkout canonical \
-            --target-base-commit "$target_head" > request.json
-          request_id="$(python -c 'import json; print(json.load(open("request.json"))["promotion_id"])')"
-          request_path="requests/$TARGET_RING/$request_id.json"
-          if gh api "repos/kody-w/openrappter-release-train/contents/$request_path?ref=main" \
-              --jq .content 2>/dev/null | base64 --decode > existing.json; then
-            python - <<'PY'
-          import json
-          assert json.load(open("existing.json")) == json.load(open("request.json"))
-          PY
-            echo "request already exists: $request_path"
-            exit 0
-          fi
-          content="$(base64 < request.json | tr -d '\n')"
-          gh api "repos/kody-w/openrappter-release-train/contents/$request_path" \
-            --method PUT -f "message=request: $TARGET_RING $request_id" \
-            -f content="$content" -f branch=main
+            --target-base-commit "$target_head" --sequence 1 > request.json
+          queue="$(python scripts/request_queue.py enqueue --root . --request request.json)"
+          changed="$(printf '%s' "$queue" | python -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
+          if [ "$changed" = false ]; then echo "request already queued"; exit 0; fi
+          request_path="$(printf '%s' "$queue" | python -c 'import json,sys; print(json.load(sys.stdin)["path"])')"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$request_path" "request-index/$TARGET_RING.json"
+          git commit -m "request: $TARGET_RING"
+          git push origin HEAD:main

@@ -29,25 +29,50 @@ jobs:
           request_id="$(python -c 'import json; print(json.load(open("request.json"))["promotion_id"])')"
           request_sha="$(python -c 'import json,hashlib; v=json.load(open("request.json")); print(hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest())')"
           found=false
-          for _ in $(seq 1 30); do
-            if curl -fsSL --proto '=https' \
-                "https://raw.githubusercontent.com/$target_repo/main/.ring/applied.json" \
-                -o applied.json; then
-              if python - "$request_id" "$request_sha" "$REQUEST_COMMIT" "$REQUEST_PATH" <<'PY'
+          if [ "$target_ring" = stable ]; then
+            branch="ring/stable-${request_id:0:16}"
+            pr="$(gh api "repos/kody-w/openrappter/pulls?state=closed&head=kody-w:$branch" --jq '.[0]')"
+            target_commit="$(printf '%s' "$pr" | python -c 'import json,sys; p=json.load(sys.stdin); assert p["merged_at"]; print(p["merge_commit_sha"])')"
+            curl -fsSL --proto '=https' \
+              "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/manifest.json" \
+              -o target.json
+            curl -fsSL --proto '=https' \
+              "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/stable-applied-request.json" \
+              -o stable-applied.json
+            python - "$target_commit" "$REQUEST_COMMIT" <<'PY'
+          import json,sys
+          target_commit,request_commit=sys.argv[1:]
+          q=json.load(open("request.json")); s=json.load(open("stable-applied.json"))
+          assert s["schema"]=="openrappter-stable-applied-request/v1"
+          assert s["request_id"]==q["promotion_id"] and s["request_sequence"]==q["sequence"]
+          assert s["request_sha256"]==__import__("hashlib").sha256(json.dumps(q,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+          assert s["request_path"].endswith(f"{q['sequence']:020d}-{q['promotion_id']}.json")
+          json.dump({"schema":"openrappter-applied-request/v1","request_id":q["promotion_id"],"request_sequence":q["sequence"],"request_sha256":s["request_sha256"],"request_authority_commit":request_commit,"request_path":s["request_path"],"target_repository":"kody-w/openrappter","target_ring":"stable","target_manifest_sha256":s["target_manifest_sha256"],"target_manifest_commit":target_commit},open("applied.json","w"))
+          PY
+            found=true
+          else
+            for _ in $(seq 1 30); do
+              if curl -fsSL --proto '=https' \
+                  "https://raw.githubusercontent.com/$target_repo/main/.ring/applied.json" \
+                  -o applied.json; then
+                if python - "$request_id" "$request_sha" "$REQUEST_COMMIT" "$REQUEST_PATH" <<'PY'
           import json,sys
           a=json.load(open("applied.json"))
           assert a["schema"]=="openrappter-applied-request/v1"
           assert [a["request_id"],a["request_sha256"],a["request_authority_commit"],a["request_path"]]==sys.argv[1:]
           PY
-              then found=true; break; fi
-            fi
-            sleep 10
-          done
+                then found=true; break; fi
+              fi
+              sleep 10
+            done
+          fi
           [ "$found" = true ] || { echo "::error::missing/mismatched target acknowledgement"; exit 1; }
-          target_commit="$(python -c 'import json; print(json.load(open("applied.json"))["target_manifest_commit"])')"
-          curl -fsSL --proto '=https' \
-            "https://raw.githubusercontent.com/$target_repo/$target_commit/.ring/manifest.json" \
-            -o target.json
+          if [ "$target_ring" != stable ]; then
+            target_commit="$(python -c 'import json; print(json.load(open("applied.json"))["target_manifest_commit"])')"
+            curl -fsSL --proto '=https' \
+              "https://raw.githubusercontent.com/$target_repo/$target_commit/.ring/manifest.json" \
+              -o target.json
+          fi
           verified_commit="$(python scripts/ringctl.py validate-applied \
             --request request.json --applied applied.json --manifest target.json)"
           test "$verified_commit" = "$target_commit"
@@ -76,7 +101,13 @@ jobs:
           if [ -n "$existing_head_sha" ]; then
             gh api "repos/kody-w/openrappter-release-train/contents/$head_path?ref=main" --jq .content \
               | base64 --decode > existing-head.json
-            head_args+=(--existing existing-head.json)
+            previous_authority="$(python -c 'import json; print(json.load(open("existing-head.json"))["authority_commit"])')"
+            previous_path="$(python -c 'import json; print(json.load(open("existing-head.json"))["receipt_path"])')"
+            curl -fsSL --proto '=https' \
+              "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$previous_authority/$previous_path" \
+              -o previous-receipt.json
+            git clone --filter=blob:none https://github.com/kody-w/openrappter.git canonical
+            head_args+=(--existing existing-head.json --previous-receipt previous-receipt.json --checkout canonical)
           fi
           head_state="$(python scripts/ringctl.py head --receipt receipt.json \
             --authority-commit "$authority_commit" --receipt-path "$receipt_path" \

@@ -1,9 +1,8 @@
-name: Apply immutable promotion request
+name: Apply next ordered promotion request
 on:
   workflow_call:
     inputs:
-      request_commit: { required: true, type: string }
-      request_path: { required: true, type: string }
+      requested_sequence: { required: false, type: number, default: 0 }
       target_ring: { required: true, type: string }
       target_repository: { required: true, type: string }
 permissions:
@@ -17,21 +16,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: kody-w/openrappter-release-train
-          ref: ${{ inputs.request_commit }}
+          ref: main
           path: authority
       - env:
           GH_TOKEN: ${{ github.token }}
-          REQUEST_COMMIT: ${{ inputs.request_commit }}
-          REQUEST_PATH: ${{ inputs.request_path }}
           TARGET_RING: ${{ inputs.target_ring }}
           TARGET_REPOSITORY: ${{ inputs.target_repository }}
+          REQUESTED_SEQUENCE: ${{ inputs.requested_sequence }}
         run: |
           set -euo pipefail
-          printf '%s' "$REQUEST_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
-          printf '%s' "$REQUEST_PATH" | grep -Eq "^requests/$TARGET_RING/[0-9a-f]{64}\.json$"
-          cp "authority/$REQUEST_PATH" request.json
-          head="$(git -C target rev-parse HEAD)"
-          python authority/scripts/target_receiver.py prepare \
+          request_commit="$(git -C authority rev-parse HEAD)"
+          cursor=0
+          if gh api "repos/$TARGET_REPOSITORY/contents/.ring/request-cursor.json?ref=main" \
+              --jq .content 2>/dev/null | base64 --decode > old-cursor.json; then
+            cursor="$(python -c 'import json; print(json.load(open("old-cursor.json"))["sequence"])')"
+          fi
+          select_args=(--index "authority/request-index/$TARGET_RING.json" --cursor "$cursor")
+          if [ "$REQUESTED_SEQUENCE" -gt 0 ]; then select_args+=(--sequence "$REQUESTED_SEQUENCE"); fi
+          selected="$(PYTHONPATH=authority/scripts python authority/scripts/request_queue.py select "${select_args[@]}")"
+          request_path="$(printf '%s' "$selected" | python -c 'import json,sys; v=json.load(sys.stdin); print(v["path"] if v else "")')"
+          [ -n "$request_path" ] || { echo "no unapplied request"; exit 0; }
+          cp "authority/$request_path" request.json
+          head="$(gh api "repos/$TARGET_REPOSITORY/commits?path=.ring/manifest.json&per_page=1" --jq '.[0].sha')"
+          PYTHONPATH=authority/scripts python authority/scripts/target_receiver.py prepare \
             --payload request.json --current target/.ring/manifest.json \
             --output proposed.json --target-ring "$TARGET_RING" \
             --target-repository "$TARGET_REPOSITORY" --current-head "$head"
@@ -52,25 +59,31 @@ jobs:
             blob="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json?ref=main" --jq .sha)"
             content="$(base64 < proposed.json | tr -d '\n')"
             gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json" --method PUT \
-              -f "message=ring: apply request" -f content="$content" \
+              -f "message=ring: apply ordered request" -f content="$content" \
               -f sha="$blob" -f branch=main
           fi
           target_commit="$(gh api "repos/$TARGET_REPOSITORY/commits?path=.ring/manifest.json&per_page=1" --jq '.[0].sha')"
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/$TARGET_REPOSITORY/$target_commit/.ring/manifest.json" \
             -o applied-manifest.json
-          python authority/scripts/target_receiver.py acknowledge \
-            --request request.json --request-commit "$REQUEST_COMMIT" \
-            --request-path "$REQUEST_PATH" --current applied-manifest.json \
+          PYTHONPATH=authority/scripts python authority/scripts/target_receiver.py acknowledge \
+            --request request.json --request-commit "$request_commit" \
+            --request-path "$request_path" --current applied-manifest.json \
             --target-manifest-commit "$target_commit" --output applied.json \
             --target-ring "$TARGET_RING" --target-repository "$TARGET_REPOSITORY"
-          existing="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json?ref=main" --jq .sha 2>/dev/null || true)"
-          if [ -n "$existing" ]; then
-            gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json?ref=main" --jq .content \
-              | base64 --decode > existing-applied.json
-            if cmp -s existing-applied.json applied.json; then exit 0; fi
-          fi
+          sequence="$(python -c 'import json; print(json.load(open("request.json"))["sequence"])')"
+          applied_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json?ref=main" --jq .sha 2>/dev/null || true)"
           content="$(base64 < applied.json | tr -d '\n')"
-          args=(--method PUT -f "message=ring: acknowledge request" -f "content=$content" -f branch=main)
-          if [ -n "$existing" ]; then args+=(-f "sha=$existing"); fi
+          args=(--method PUT -f "message=ring: acknowledge sequence $sequence" -f "content=$content" -f branch=main)
+          if [ -n "$applied_sha" ]; then args+=(-f "sha=$applied_sha"); fi
           gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json" "${args[@]}"
+          python - "$sequence" <<'PY'
+          import json,sys
+          a=json.load(open("applied.json"))
+          json.dump({"schema":"openrappter-request-cursor/v1","sequence":int(sys.argv[1]),"request_id":a["request_id"],"request_sha256":a["request_sha256"]},open("cursor.json","w"),indent=2,sort_keys=True)
+          PY
+          cursor_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/request-cursor.json?ref=main" --jq .sha 2>/dev/null || true)"
+          content="$(base64 < cursor.json | tr -d '\n')"
+          args=(--method PUT -f "message=ring: advance cursor $sequence" -f "content=$content" -f branch=main)
+          if [ -n "$cursor_sha" ]; then args+=(-f "sha=$cursor_sha"); fi
+          gh api "repos/$TARGET_REPOSITORY/contents/.ring/request-cursor.json" "${args[@]}"
