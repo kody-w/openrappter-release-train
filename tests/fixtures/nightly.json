@@ -17,5 +17,6 @@
   "predecessor": null,
   "status": "unpublished",
   "reason": "The main snapshot is pinned and checksummed, but no installable nightly package exists yet.",
-  "receipt": null
+  "receipt": null,
+  "promotion_id": null
 }

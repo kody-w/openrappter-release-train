@@ -1,0 +1,116 @@
+name: Receive authorized ring state
+
+on:
+  workflow_call:
+    inputs:
+      authority_commit:
+        required: true
+        type: string
+      action:
+        required: true
+        type: string
+      payload_json:
+        required: true
+        type: string
+      target_ring:
+        required: true
+        type: string
+      target_repository:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  receive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: target
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: ${{ inputs.authority_commit }}
+          path: authority
+      - name: Materialize closed payload
+        env:
+          PAYLOAD_JSON: ${{ inputs.payload_json }}
+        run: python -c 'import os; open("payload.json","w").write(os.environ["PAYLOAD_JSON"])'
+      - name: Prepare and atomically apply exact manifest
+        if: inputs.action == 'ring-promotion'
+        id: prepare
+        env:
+          TARGET_RING: ${{ inputs.target_ring }}
+          TARGET_REPOSITORY: ${{ inputs.target_repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(git -C target rev-parse HEAD)"
+          python authority/scripts/target_receiver.py prepare \
+            --payload payload.json --current target/.ring/manifest.json \
+            --output proposed.json --target-ring "$TARGET_RING" \
+            --target-repository "$TARGET_REPOSITORY" --current-head "$head"
+      - name: Verify ancestry, artifact, and mutate target
+        if: inputs.action == 'ring-promotion'
+        env:
+          TARGET_REPOSITORY: ${{ inputs.target_repository }}
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_SOURCE: ${{ steps.prepare.outputs.previous_source_commit }}
+          PROPOSED_SOURCE: ${{ steps.prepare.outputs.proposed_source_commit }}
+          SOURCE_TAG: ${{ steps.prepare.outputs.source_tag }}
+          ARTIFACT_URL: ${{ steps.prepare.outputs.artifact_url }}
+          ARTIFACT_SHA256: ${{ steps.prepare.outputs.artifact_sha256 }}
+          NOOP: ${{ steps.prepare.outputs.noop }}
+          PROMOTION_ID: ${{ steps.prepare.outputs.promotion_id }}
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/kody-w/openrappter.git canonical
+          git -C canonical merge-base --is-ancestor "$PREVIOUS_SOURCE" "$PROPOSED_SOURCE"
+          git -C canonical merge-base --is-ancestor "$PROPOSED_SOURCE" origin/main
+          if [ -n "$SOURCE_TAG" ]; then
+            test "$(git -C canonical rev-list -n 1 "$SOURCE_TAG")" = "$PROPOSED_SOURCE"
+          fi
+          curl -fsSL --proto '=https' "$ARTIFACT_URL" -o artifact
+          echo "$ARTIFACT_SHA256  artifact" | sha256sum -c -
+          if [ "$NOOP" = "true" ]; then exit 0; fi
+          blob_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json?ref=main" --jq .sha)"
+          content="$(base64 < proposed.json | tr -d '\n')"
+          gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json" --method PUT \
+            -f message="ring: apply promotion $PROMOTION_ID" \
+            -f content="$content" -f sha="$blob_sha" -f branch=main > mutation.json
+      - name: Verify immutable receipt and atomically bind authority pointer
+        if: inputs.action == 'ring-receipt'
+        env:
+          TARGET_RING: ${{ inputs.target_ring }}
+          TARGET_REPOSITORY: ${{ inputs.target_repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          authority_commit="$(python -c 'import json; print(json.load(open("payload.json"))["authority_commit"])')"
+          receipt_path="$(python -c 'import json; print(json.load(open("payload.json"))["receipt_path"])')"
+          target_commit="$(python -c 'import json; print(json.load(open("payload.json"))["target_manifest_commit"])')"
+          printf '%s' "$authority_commit$target_commit" | grep -Eq '^[0-9a-f]{80}$'
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/$authority_commit/$receipt_path" \
+            -o receipt.json
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/$TARGET_REPOSITORY/$target_commit/.ring/manifest.json" \
+            -o immutable.json
+          python authority/scripts/target_receiver.py receipt \
+            --payload payload.json --receipt receipt.json \
+            --current target/.ring/manifest.json --immutable immutable.json \
+            --output authority.json --target-ring "$TARGET_RING" \
+            --target-repository "$TARGET_REPOSITORY"
+          existing="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/authority.json?ref=main" --jq .sha 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api "repos/$TARGET_REPOSITORY/contents/.ring/authority.json?ref=main" --jq .content \
+              | base64 --decode > existing-authority.json
+            if cmp -s existing-authority.json authority.json; then exit 0; fi
+          fi
+          content="$(base64 < authority.json | tr -d '\n')"
+          args=(--method PUT -f "message=ring: bind immutable receipt" -f "content=$content" -f branch=main)
+          if [ -n "$existing" ]; then args+=(-f "sha=$existing"); fi
+          gh api "repos/$TARGET_REPOSITORY/contents/.ring/authority.json" "${args[@]}"

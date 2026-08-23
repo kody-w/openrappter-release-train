@@ -15,6 +15,7 @@
     "status",
     "reason",
     "receipt"
+    ,"promotion_id"
   ],
   "properties": {
     "schema": { "const": "openrappter-ring/v1" },
@@ -56,7 +57,8 @@
         "provenance": {
           "enum": [
             "github-commit-archive-sha256",
-            "npm-registry-download-sha256"
+            "npm-registry-download-sha256",
+            "github-release-download-sha256"
           ]
         }
       }
@@ -82,6 +84,12 @@
           "type": "string",
           "pattern": "^https://github\\.com/kody-w/openrappter-release-train/blob/[0-9a-f]{40}/receipts/"
         }
+      ]
+    },
+    "promotion_id": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       ]
     }
   }
