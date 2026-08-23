@@ -101,3 +101,10 @@ gh run watch -R kody-w/openrappter-release-train \
 
 Each next request is accepted only after the preceding ring has a finalized
 immutable receipt. Stable remains a separate later decision.
+
+Distribution is separately governed by
+[`RELEASE_CONSTITUTION.md`](RELEASE_CONSTITUTION.md). The named **Release
+Constitution** check must verify the exact finalized nightly→alpha→canary→beta
+chain before any stable/tag/registry/release/installer publication. The
+ruleset payload is intentionally committed but not applied; apply it only after
+the check workflow has merged and appeared on `main`.
