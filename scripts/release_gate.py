@@ -234,12 +234,15 @@ def main() -> int:
     parser.add_argument("--chain")
     parser.add_argument("--remote", action="store_true")
     parser.add_argument("--discover-artifact", action="store_true")
+    parser.add_argument("--local-artifact-sha")
     args = parser.parse_args()
     try:
         policy = load_policy(Path(args.policy))
         release = json.loads(Path(args.release).read_text())
         if args.discover_artifact:
             release = discover_artifact(release)
+        if args.local_artifact_sha and release.get("artifact_sha256") != args.local_artifact_sha:
+            raise ConstitutionError("locally built artifact checksum differs from finalized beta artifact")
         chain = fetch_chain(release) if args.remote else json.loads(Path(args.chain).read_text())
         validate_chain(release, chain, policy)
         print("Release Constitution: exact finalized chain verified")
