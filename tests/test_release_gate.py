@@ -60,6 +60,7 @@ class ReleaseConstitutionTests(unittest.TestCase):
             receipt = {
                 "schema": "openrappter-promotion-receipt/v1",
                 "receipt_kind": "promotion",
+                "sequence": index + 1,
                 "promotion_id": promotion_id,
                 "target_repository": f"kody-w/openrappter-{ring}",
                 "target_ring": ring,

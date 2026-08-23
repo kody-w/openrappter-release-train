@@ -17,14 +17,15 @@ def load_index(root: Path, ring: str) -> dict:
         return {
             "schema": "openrappter-request-index/v1",
             "ring": ring,
-            "next_sequence": 1,
+            "base_sequence": 1,
+            "next_sequence": 2,
             "entries": [],
         }
     value = json.loads(path.read_text())
-    if set(value) != {"schema", "ring", "next_sequence", "entries"} or value["schema"] != "openrappter-request-index/v1" or value["ring"] != ring:
+    if set(value) != {"schema", "ring", "base_sequence", "next_sequence", "entries"} or value["schema"] != "openrappter-request-index/v1" or value["ring"] != ring:
         raise QueueError("request index is not closed")
     sequences = [entry["sequence"] for entry in value["entries"]]
-    if sequences != list(range(1, len(sequences) + 1)) or value["next_sequence"] != len(sequences) + 1:
+    if sequences != list(range(value["base_sequence"] + 1, value["next_sequence"])) or value["next_sequence"] != value["base_sequence"] + len(sequences) + 1:
         raise QueueError("request index has a gap or non-monotonic sequence")
     return value
 
@@ -65,7 +66,7 @@ def select(index: dict, cursor: int, requested: int | None = None) -> dict | Non
     ring = index["ring"]
     # Revalidate gaps independently of enqueue.
     sequences = [entry["sequence"] for entry in index["entries"]]
-    if sequences != list(range(1, len(sequences) + 1)):
+    if sequences != list(range(index["base_sequence"] + 1, index["next_sequence"])):
         raise QueueError("request queue gap")
     wanted = requested if requested is not None else cursor + 1
     if wanted <= cursor:
@@ -78,6 +79,14 @@ def select(index: dict, cursor: int, requested: int | None = None) -> dict | Non
     return entry
 
 
+def next_applicable(index: dict, finalized: int, applied: int, requested: int | None = None) -> dict | None:
+    if applied > finalized:
+        return None
+    if applied < finalized:
+        raise QueueError("applied cursor trails finalized authority head")
+    return select(index, finalized, requested)
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -86,13 +95,19 @@ def main():
     choose = sub.add_parser("select")
     choose.add_argument("--index", required=True); choose.add_argument("--cursor", type=int, required=True)
     choose.add_argument("--sequence", type=int)
+    choose.add_argument("--applied", type=int)
     args = parser.parse_args()
     if args.command == "enqueue":
         request = json.loads(Path(args.request).read_text())
         _, path, changed = enqueue(Path(args.root), request)
         print(json.dumps({"path": path, "sequence": request["sequence"], "changed": changed}))
     else:
-        entry = select(json.loads(Path(args.index).read_text()), args.cursor, args.sequence)
+        index = json.loads(Path(args.index).read_text())
+        entry = (
+            next_applicable(index, args.cursor, args.applied, args.sequence)
+            if args.applied is not None
+            else select(index, args.cursor, args.sequence)
+        )
         print(json.dumps(entry))
 
 

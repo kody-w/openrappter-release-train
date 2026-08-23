@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -61,14 +62,16 @@ def nightly_request_id(
     artifact_url: str,
     artifact_sha256: str,
     promoted_at: str,
+    source_tag: str | None,
+    published: bool,
 ) -> str:
     source_identity = {
         "repository": "kody-w/openrappter",
         "commit": head,
-        "tag": None,
+        "tag": source_tag,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": artifact_url,
+        "install_url": artifact_url if published else None,
         "artifact_sha256": artifact_sha256,
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": promoted_at,
@@ -79,10 +82,10 @@ def nightly_request_id(
         "target_repository": REPOS["nightly"],
         "source_repository": source_identity["repository"],
         "source_commit": head,
-        "source_tag": None,
+        "source_tag": source_tag,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": artifact_url,
+        "install_url": artifact_url if published else None,
         "artifact_sha256": artifact_sha256,
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": promoted_at,
@@ -101,6 +104,8 @@ def build_request(
     previous_manifest: dict,
     target_base_commit: str,
     sequence: int,
+    release_tag: str | None,
+    candidate_kind: str,
 ) -> dict:
     validate_manifest(previous_manifest, expected_ring="nightly")
     dt.datetime.fromisoformat(committed_at.replace("Z", "+00:00"))
@@ -111,14 +116,16 @@ def build_request(
         artifact_url=artifact_url,
         artifact_sha256=artifact_sha256,
         promoted_at=committed_at,
+        source_tag=release_tag,
+        published=candidate_kind == "release",
     )
     source_identity = {
         "repository": "kody-w/openrappter",
         "commit": head,
-        "tag": None,
+        "tag": release_tag,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": artifact_url,
+        "install_url": artifact_url if candidate_kind == "release" else None,
         "artifact_sha256": artifact_sha256,
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": committed_at,
@@ -129,19 +136,19 @@ def build_request(
         "source": {
             "repository": "kody-w/openrappter",
             "commit": head,
-            "tag": None,
+            "tag": release_tag,
         },
         "version": version,
         "artifact": {
             "url": artifact_url,
-            "install_url": artifact_url,
+            "install_url": artifact_url if candidate_kind == "release" else None,
             "sha256": artifact_sha256,
             "provenance": "github-candidate-bundle-sha256",
         },
         "promoted_at": committed_at,
         "predecessor": None,
-        "status": "published",
-        "reason": None,
+        "status": "published" if candidate_kind == "release" else "unpublished",
+        "reason": None if candidate_kind == "release" else "Continuous untagged snapshot; never stable-publishable.",
         "receipt": None,
         "promotion_id": promotion_id,
     }
@@ -157,10 +164,10 @@ def build_request(
         "target_previous_source_commit": previous_manifest["source"]["commit"],
         "source_repository": "kody-w/openrappter",
         "source_commit": head,
-        "source_tag": None,
+        "source_tag": release_tag,
         "version": version,
         "artifact_url": artifact_url,
-        "install_url": artifact_url,
+        "install_url": artifact_url if candidate_kind == "release" else None,
         "artifact_sha256": artifact_sha256,
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": committed_at,
@@ -170,6 +177,31 @@ def build_request(
     }
     validate_payload(request)
     return request
+
+
+def candidate_fields(provenance: dict, bundle_names: list[str], head: str, candidate_commit: str) -> tuple[str, str, str, str]:
+    if (
+        provenance.get("schema") != "openrappter-candidate-provenance/v1"
+        or provenance.get("channel") != "candidate"
+        or provenance.get("stable") is not False
+        or provenance.get("source_commit") != head
+        or provenance.get("candidate_kind") not in {"release", "snapshot"}
+    ):
+        raise ObservationError("candidate provenance rejected")
+    bundles = [name for name in bundle_names if re.fullmatch(r"[0-9a-f]{64}\.tar\.gz", name)]
+    if len(bundles) != 1:
+        raise ObservationError("candidate store must contain exactly one bundle")
+    sha = bundles[0][:-7]
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise ObservationError("candidate bundle SHA-256 is empty or malformed")
+    kind = provenance["candidate_kind"]
+    tag = provenance.get("release_tag")
+    if kind == "release" and (not isinstance(tag, str) or tag != f"v{provenance['version']}"):
+        raise ObservationError("release candidate tag/version mismatch")
+    if kind == "snapshot" and tag is not None:
+        raise ObservationError("continuous snapshot must be untagged")
+    url = f"https://raw.githubusercontent.com/kody-w/openrappter/{candidate_commit}/candidates/{head}/{sha}.tar.gz"
+    return provenance["version"], kind, tag or "-", url
 
 
 def main() -> int:
@@ -182,9 +214,13 @@ def main() -> int:
     build = sub.add_parser("build")
     for name in (
         "head", "package-version", "committed-at", "artifact-url", "artifact-sha256",
-        "previous-manifest", "target-base-commit", "sequence", "output",
+        "previous-manifest", "target-base-commit", "sequence", "release-tag",
+        "candidate-kind", "output",
     ):
         build.add_argument(f"--{name}", required=True)
+    candidate = sub.add_parser("candidate")
+    for name in ("provenance", "bundle-list", "head", "candidate-commit"):
+        candidate.add_argument(f"--{name}", required=True)
     args = parser.parse_args()
     try:
         if args.command == "verify":
@@ -193,6 +229,14 @@ def main() -> int:
                 args.head,
                 required_checks(Path(args.policy)),
             )
+        elif args.command == "candidate":
+            fields = candidate_fields(
+                json.loads(Path(args.provenance).read_text()),
+                Path(args.bundle_list).read_text().splitlines(),
+                args.head,
+                args.candidate_commit,
+            )
+            print("\t".join(fields))
         else:
             request = build_request(
                 head=args.head,
@@ -203,6 +247,8 @@ def main() -> int:
                 previous_manifest=json.loads(Path(args.previous_manifest).read_text()),
                 target_base_commit=args.target_base_commit,
                 sequence=int(args.sequence),
+                release_tag=args.release_tag or None,
+                candidate_kind=args.candidate_kind,
             )
             Path(args.output).write_bytes(
                 json.dumps(request, indent=2, sort_keys=True).encode() + b"\n"

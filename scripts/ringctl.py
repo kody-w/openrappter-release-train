@@ -134,7 +134,17 @@ def validate_artifact(artifact: object, version: str, tag: str | None, status: s
         expected = re.compile(
             r"https://github\.com/kody-w/openrappter/archive/[0-9a-f]{40}\.tar\.gz"
         )
-        if provenance != "github-commit-archive-sha256" or not isinstance(url, str) or not expected.fullmatch(url):
+        candidate = (
+            provenance == "github-candidate-bundle-sha256"
+            and isinstance(url, str)
+            and re.fullmatch(
+                rf"https://raw\.githubusercontent\.com/kody-w/openrappter/"
+                rf"[0-9a-f]{{40}}/candidates/[0-9a-f]{{40}}/{re.escape(sha)}\.tar\.gz",
+                url,
+            )
+        )
+        archive = provenance == "github-commit-archive-sha256" and isinstance(url, str) and expected.fullmatch(url)
+        if not (candidate or archive):
             raise ManifestError("non-published artifact must be an exact canonical commit archive")
         return value
     npm_url = f"https://registry.npmjs.org/openrappter/-/openrappter-{version}.tgz"
@@ -389,7 +399,7 @@ RECEIPT_KEYS = {
     "target_manifest_sha256", "target_manifest_commit", "source_repository",
     "source_commit", "source_tag", "version", "artifact_url", "install_url",
     "artifact_sha256", "artifact_provenance", "predecessor_manifest_sha256",
-    "emitted_at", "receipt_kind",
+    "emitted_at", "receipt_kind", "sequence",
 }
 APPLIED_KEYS = {
     "schema", "request_id", "request_sha256", "request_authority_commit",
@@ -411,7 +421,10 @@ def validate_receipt(
     current_manifest: dict,
     immutable_manifest: dict,
 ) -> dict:
-    value = _closed(receipt, RECEIPT_KEYS, "receipt")
+    if isinstance(receipt, dict) and receipt.get("receipt_kind") == "bootstrap" and "sequence" not in receipt:
+        value = _closed(receipt, RECEIPT_KEYS - {"sequence"}, "legacy bootstrap receipt")
+    else:
+        value = _closed(receipt, RECEIPT_KEYS, "receipt")
     if value["schema"] != "openrappter-promotion-receipt/v1":
         raise ManifestError("unknown receipt schema")
     if value["receipt_kind"] not in {"bootstrap", "promotion"}:
@@ -510,7 +523,14 @@ def make_head(
             return old, False
         if previous_receipt is None or checkout is None:
             raise ManifestError("advancing authority head requires previous receipt and canonical checkout")
-        previous = _closed(previous_receipt, RECEIPT_KEYS, "previous receipt")
+        previous_keys = (
+            RECEIPT_KEYS - {"sequence"}
+            if isinstance(previous_receipt, dict)
+            and previous_receipt.get("receipt_kind") == "bootstrap"
+            and "sequence" not in previous_receipt
+            else RECEIPT_KEYS
+        )
+        previous = _closed(previous_receipt, previous_keys, "previous receipt")
         if previous["promotion_id"] != old["promotion_id"]:
             raise ManifestError("previous receipt does not match current authority head")
         if compare_semver(value["version"], previous["version"]) < 0:
@@ -520,8 +540,10 @@ def make_head(
             if not value.get(field):
                 raise ManifestError(f"new receipt lacks {field}")
         sequence = old["sequence"] + 1
+        if value["sequence"] != sequence:
+            raise ManifestError("receipt sequence is not previous authority head + 1")
     else:
-        sequence = 1
+        sequence = value.get("sequence", 1)
     return {**base, "sequence": sequence}, True
 
 
@@ -535,6 +557,7 @@ def make_receipt(
     return {
         "schema": "openrappter-promotion-receipt/v1",
         "receipt_kind": "promotion",
+        "sequence": payload["sequence"],
         "promotion_id": payload["promotion_id"],
         "target_repository": payload["target_repository"],
         "target_ring": payload["to"],

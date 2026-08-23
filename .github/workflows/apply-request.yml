@@ -26,12 +26,17 @@ jobs:
         run: |
           set -euo pipefail
           request_commit="$(git -C authority rev-parse HEAD)"
-          cursor=0
-          if gh api "repos/$TARGET_REPOSITORY/contents/.ring/request-cursor.json?ref=main" \
-              --jq .content 2>/dev/null | base64 --decode > old-cursor.json; then
-            cursor="$(python -c 'import json; print(json.load(open("old-cursor.json"))["sequence"])')"
+          finalized="$(python -c 'import json; print(json.load(open("authority/heads/'"$TARGET_RING"'.json"))["sequence"])')"
+          applied="$finalized"
+          if gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied-cursor.json?ref=main" \
+              --jq .content 2>/dev/null | base64 --decode > old-applied-cursor.json; then
+            applied="$(python -c 'import json; print(json.load(open("old-applied-cursor.json"))["sequence"])')"
           fi
-          select_args=(--index "authority/request-index/$TARGET_RING.json" --cursor "$cursor")
+          if [ "$applied" -gt "$finalized" ]; then
+            echo "sequence $applied is applied but not finalized; waiting"
+            exit 0
+          fi
+          select_args=(--index "authority/request-index/$TARGET_RING.json" --cursor "$finalized" --applied "$applied")
           if [ "$REQUESTED_SEQUENCE" -gt 0 ]; then select_args+=(--sequence "$REQUESTED_SEQUENCE"); fi
           selected="$(PYTHONPATH=authority/scripts python authority/scripts/request_queue.py select "${select_args[@]}")"
           request_path="$(printf '%s' "$selected" | python -c 'import json,sys; v=json.load(sys.stdin); print(v["path"] if v else "")')"
@@ -72,18 +77,34 @@ jobs:
             --target-manifest-commit "$target_commit" --output applied.json \
             --target-ring "$TARGET_RING" --target-repository "$TARGET_REPOSITORY"
           sequence="$(python -c 'import json; print(json.load(open("request.json"))["sequence"])')"
-          applied_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json?ref=main" --jq .sha 2>/dev/null || true)"
-          content="$(base64 < applied.json | tr -d '\n')"
-          args=(--method PUT -f "message=ring: acknowledge sequence $sequence" -f "content=$content" -f branch=main)
-          if [ -n "$applied_sha" ]; then args+=(-f "sha=$applied_sha"); fi
-          gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json" "${args[@]}"
+          request_id="$(python -c 'import json; print(json.load(open("request.json"))["promotion_id"])')"
+          ack_path=".ring/applied/$(printf '%020d' "$sequence")-$request_id.json"
+          applied_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/$ack_path?ref=main" --jq .sha 2>/dev/null || true)"
+          if [ -n "$applied_sha" ]; then
+            gh api "repos/$TARGET_REPOSITORY/contents/$ack_path?ref=main" --jq .content \
+              | base64 --decode > existing-applied.json
+            cmp -s existing-applied.json applied.json
+          else
+            content="$(base64 < applied.json | tr -d '\n')"
+            gh api "repos/$TARGET_REPOSITORY/contents/$ack_path" --method PUT \
+              -f "message=ring: acknowledge sequence $sequence" -f "content=$content" -f branch=main
+          fi
           python - "$sequence" <<'PY'
           import json,sys
           a=json.load(open("applied.json"))
-          json.dump({"schema":"openrappter-request-cursor/v1","sequence":int(sys.argv[1]),"request_id":a["request_id"],"request_sha256":a["request_sha256"]},open("cursor.json","w"),indent=2,sort_keys=True)
+          json.dump({"schema":"openrappter-applied-cursor/v1","sequence":int(sys.argv[1]),"request_id":a["request_id"],"request_sha256":a["request_sha256"]},open("cursor.json","w"),indent=2,sort_keys=True)
           PY
-          cursor_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/request-cursor.json?ref=main" --jq .sha 2>/dev/null || true)"
+          cursor_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied-cursor.json?ref=main" --jq .sha 2>/dev/null || true)"
           content="$(base64 < cursor.json | tr -d '\n')"
-          args=(--method PUT -f "message=ring: advance cursor $sequence" -f "content=$content" -f branch=main)
+          args=(--method PUT -f "message=ring: advance applied cursor $sequence" -f "content=$content" -f branch=main)
           if [ -n "$cursor_sha" ]; then args+=(-f "sha=$cursor_sha"); fi
-          gh api "repos/$TARGET_REPOSITORY/contents/.ring/request-cursor.json" "${args[@]}"
+          gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied-cursor.json" "${args[@]}"
+          python - "$finalized" <<'PY'
+          import json,sys
+          json.dump({"schema":"openrappter-finalized-cursor/v1","sequence":int(sys.argv[1])},open("finalized-cursor.json","w"),indent=2,sort_keys=True)
+          PY
+          finalized_sha="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/finalized-cursor.json?ref=main" --jq .sha 2>/dev/null || true)"
+          content="$(base64 < finalized-cursor.json | tr -d '\n')"
+          args=(--method PUT -f "message=ring: observe finalized cursor $finalized" -f "content=$content" -f branch=main)
+          if [ -n "$finalized_sha" ]; then args+=(-f "sha=$finalized_sha"); fi
+          gh api "repos/$TARGET_REPOSITORY/contents/.ring/finalized-cursor.json" "${args[@]}"

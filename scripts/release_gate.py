@@ -275,17 +275,99 @@ def verify_candidate_bytes(release: dict, local_dir: Path) -> None:
         shutil.rmtree(extracted, ignore_errors=True)
 
 
+def verify_pages(
+    head: dict,
+    receipt: dict,
+    manifest: dict,
+    bundle: Path,
+    docs: Path,
+) -> None:
+    expected_head = {
+        "schema", "ring", "sequence", "promotion_id", "authority_commit",
+        "receipt_path", "receipt_sha256", "target_repository",
+        "target_manifest_commit", "target_manifest_sha256",
+    }
+    if (
+        set(head) != expected_head
+        or head["schema"] != "openrappter-ring-head/v1"
+        or head["ring"] != "stable"
+        or head["target_repository"] != "kody-w/openrappter"
+        or not isinstance(head["sequence"], int)
+        or head["sequence"] < 1
+        or digest(receipt) != head["receipt_sha256"]
+        or digest(manifest) != head["target_manifest_sha256"]
+        or receipt["promotion_id"] != head["promotion_id"]
+        or receipt["target_manifest_commit"] != head["target_manifest_commit"]
+        or (receipt.get("sequence") is not None and receipt["sequence"] != head["sequence"])
+    ):
+        raise ConstitutionError("stable authority head/receipt/manifest mismatch")
+    try:
+        validate_receipt(
+            receipt,
+            target_repository="kody-w/openrappter",
+            target_ring="stable",
+            current_manifest=manifest,
+            immutable_manifest=manifest,
+        )
+    except ManifestError as exc:
+        raise ConstitutionError(str(exc)) from exc
+    if (
+        receipt["receipt_kind"] != "promotion"
+        or receipt["artifact_provenance"] != "github-candidate-bundle-sha256"
+        or not receipt["source_tag"]
+        or hashlib.sha256(bundle.read_bytes()).hexdigest() != receipt["artifact_sha256"]
+    ):
+        raise ConstitutionError("stable receipt is not a finalized tagged candidate")
+    work = docs.parent / ".pages-authority-verify"
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir()
+    try:
+        with tarfile.open(bundle, "r:gz") as archive:
+            archive.extractall(work, filter="data")
+        provenance = json.loads((work / "provenance.json").read_text())
+        if (
+            provenance["schema"] != "openrappter-candidate-provenance/v1"
+            or provenance["candidate_kind"] != "release"
+            or provenance["release_tag"] != receipt["source_tag"]
+            or provenance["source_commit"] != receipt["source_commit"]
+            or provenance["version"] != receipt["version"]
+        ):
+            raise ConstitutionError("candidate provenance/tag identity mismatch")
+        for name in ("install.sh", "install.ps1"):
+            if (work / name).read_bytes() != (docs / name).read_bytes():
+                raise ConstitutionError(f"mutable installer refused: {name}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--policy", required=True)
-    parser.add_argument("--release", required=True)
+    parser.add_argument("--release")
     parser.add_argument("--chain")
     parser.add_argument("--remote", action="store_true")
     parser.add_argument("--discover-artifact", action="store_true")
     parser.add_argument("--local-artifacts-dir")
+    parser.add_argument("--pages-head")
+    parser.add_argument("--pages-receipt")
+    parser.add_argument("--pages-manifest")
+    parser.add_argument("--pages-bundle")
+    parser.add_argument("--pages-docs")
     args = parser.parse_args()
     try:
         policy = load_policy(Path(args.policy))
+        if args.pages_head:
+            verify_pages(
+                json.loads(Path(args.pages_head).read_text()),
+                json.loads(Path(args.pages_receipt).read_text()),
+                json.loads(Path(args.pages_manifest).read_text()),
+                Path(args.pages_bundle),
+                Path(args.pages_docs),
+            )
+            print("Release Constitution: stable Pages installer bytes verified")
+            return 0
+        if not args.release:
+            raise ConstitutionError("--release is required outside Pages verification")
         release = json.loads(Path(args.release).read_text())
         if args.discover_artifact:
             release = discover_artifact(release)

@@ -1,5 +1,6 @@
 import json
 import sys
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -66,6 +67,8 @@ class ObserveMainTests(unittest.TestCase):
             "previous_manifest": self.previous,
             "target_base_commit": "d" * 40,
             "sequence": 1,
+            "release_tag": "v2.0.0",
+            "candidate_kind": "release",
         }
         first = build_request(**kwargs)
         second = build_request(**kwargs)
@@ -77,6 +80,8 @@ class ObserveMainTests(unittest.TestCase):
             artifact_url=kwargs["artifact_url"],
             artifact_sha256="c" * 64,
             promoted_at="2026-08-23T20:00:00Z",
+            source_tag="v2.0.0",
+            published=True,
         )
         self.assertEqual(first["promotion_id"], expected)
         self.assertIsNone(first["from"])
@@ -106,6 +111,37 @@ class ObserveMainTests(unittest.TestCase):
         self.assertNotIn("client_payload", workflow)
         self.assertIn("heads/nightly.json", workflow)
         self.assertNotIn("openrappter-nightly/commits/main", workflow)
+
+    def test_candidate_workflow_output_parses_as_one_tab_delimited_record(self):
+        work = ROOT / "tests/.candidate-output"
+        work.mkdir(exist_ok=True)
+        try:
+            provenance = {
+                "schema": "openrappter-candidate-provenance/v1",
+                "channel": "candidate",
+                "stable": False,
+                "candidate_kind": "release",
+                "release_tag": "v2.0.0",
+                "source_commit": self.head,
+                "version": "2.0.0",
+            }
+            (work / "provenance.json").write_text(json.dumps(provenance))
+            (work / "bundles.txt").write_text(f"{'c' * 64}.tar.gz\nprovenance.json\n")
+            result = subprocess.run(
+                [
+                    sys.executable, str(ROOT / "scripts/observe_main.py"), "candidate",
+                    "--provenance", str(work / "provenance.json"),
+                    "--bundle-list", str(work / "bundles.txt"),
+                    "--head", self.head, "--candidate-commit", "b" * 40,
+                ],
+                text=True, capture_output=True, check=True,
+            )
+            fields = result.stdout.rstrip("\n").split("\t")
+            self.assertEqual(len(fields), 4)
+            self.assertEqual(fields[:3], ["2.0.0", "release", "v2.0.0"])
+            self.assertRegex(fields[3], rf"/{'c' * 64}\.tar\.gz$")
+        finally:
+            __import__("shutil").rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

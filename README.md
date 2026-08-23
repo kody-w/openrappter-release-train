@@ -50,7 +50,12 @@ It never writes the nightly repository and never requests alpha or later.
 Immediately after a release-relevant merge:
 
 ```sh
-gh workflow run build-candidate.yml -R kody-w/openrappter
+candidate_commit="$(gh api repos/kody-w/openrappter/commits/main --jq .sha)"
+gh workflow run build-candidate.yml -R kody-w/openrappter \
+  -f source_commit="$candidate_commit" \
+  -f version=0.1.0-beta.11 \
+  -f release_tag=v0.1.0-beta.11 \
+  -f candidate_kind=release
 gh run watch -R kody-w/openrappter \
   "$(gh run list -R kody-w/openrappter --workflow build-candidate.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 gh workflow run observe-main.yml -R kody-w/openrappter-release-train
@@ -107,12 +112,19 @@ gh run watch -R kody-w/openrappter-release-train \
 Each next request is accepted only after the preceding ring has a finalized
 immutable receipt. Stable remains a separate later decision.
 
-After merge, switch Pages from legacy `main/docs` to the receipted workflow:
+**Before merging openrappter#437**, switch Pages from legacy `main/docs` to
+workflow deployment:
 
 ```sh
 gh api repos/kody-w/openrappter/pages --method PUT \
   --input <(printf '%s\n' '{"build_type":"workflow"}')
 ```
+
+GitHub retains the last successful Pages deployment when workflow source is
+selected but `pages.yml` is not yet present or a later constitution check
+fails; this command does not delete the current site. After #437 merges, the
+first deployment occurs only if finalized stable candidate installer bytes
+match exactly.
 
 Latest-state authority is `heads/<ring>.json`, not a target repository's
 mutable `main`. Each head advances a monotonic sequence and names one immutable

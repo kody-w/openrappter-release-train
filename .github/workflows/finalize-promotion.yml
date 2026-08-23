@@ -27,7 +27,20 @@ jobs:
           target_repo="$(python -c 'import json; print(json.load(open("request.json"))["target_repository"])')"
           target_ring="$(python -c 'import json; print(json.load(open("request.json"))["to"])')"
           request_id="$(python -c 'import json; print(json.load(open("request.json"))["promotion_id"])')"
+          request_sequence="$(python -c 'import json; print(json.load(open("request.json"))["sequence"])')"
           request_sha="$(python -c 'import json,hashlib; v=json.load(open("request.json")); print(hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest())')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/$target_ring.json" \
+            -o current-head.json
+          finalized_sequence="$(python -c 'import json; print(json.load(open("current-head.json"))["sequence"])')"
+          finalized_id="$(python -c 'import json; print(json.load(open("current-head.json"))["promotion_id"])')"
+          if [ "$request_sequence" -eq "$finalized_sequence" ] && [ "$request_id" = "$finalized_id" ]; then
+            echo "idempotent finalized replay"
+          elif [ "$request_sequence" -ne $((finalized_sequence + 1)) ]; then
+            echo "::error::request sequence is neither exact replay nor finalized+1"
+            exit 1
+          fi
+          ack_path=".ring/applied/$(printf '%020d' "$request_sequence")-$request_id.json"
           found=false
           if [ "$target_ring" = stable ]; then
             branch="ring/stable-${request_id:0:16}"
@@ -37,7 +50,7 @@ jobs:
               "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/manifest.json" \
               -o target.json
             curl -fsSL --proto '=https' \
-              "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/.ring/stable-applied-request.json" \
+              "https://raw.githubusercontent.com/kody-w/openrappter/$target_commit/$ack_path" \
               -o stable-applied.json
             python - "$target_commit" "$REQUEST_COMMIT" <<'PY'
           import json,sys
@@ -53,7 +66,7 @@ jobs:
           else
             for _ in $(seq 1 30); do
               if curl -fsSL --proto '=https' \
-                  "https://raw.githubusercontent.com/$target_repo/main/.ring/applied.json" \
+                  "https://raw.githubusercontent.com/$target_repo/main/$ack_path" \
                   -o applied.json; then
                 if python - "$request_id" "$request_sha" "$REQUEST_COMMIT" "$REQUEST_PATH" <<'PY'
           import json,sys
