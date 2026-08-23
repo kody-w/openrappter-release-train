@@ -19,6 +19,11 @@ artifact trust, or bypass flag. Emergency rollback may select only an exact
 artifact already covered by a complete finalized chain and must create a
 separate immutable rollback receipt.
 
+The only publishable bytes are the inner files of the exact immutable
+`github-candidate-bundle-sha256` bundle finalized by beta. Registry, release,
+and Pages jobs compare their local files against that bundle and never rebuild
+after the gate.
+
 Local builds, tests, development, and the release-ring selector are outside
 this distribution gate. Prose explains the rule; `release_gate.py` and the
 static workflow tests enforce it.

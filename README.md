@@ -50,17 +50,21 @@ It never writes the nightly repository and never requests alpha or later.
 Immediately after a release-relevant merge:
 
 ```sh
+gh workflow run build-candidate.yml -R kody-w/openrappter
+gh run watch -R kody-w/openrappter \
+  "$(gh run list -R kody-w/openrappter --workflow build-candidate.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 gh workflow run observe-main.yml -R kody-w/openrappter-release-train
 gh run watch -R kody-w/openrappter-release-train \
   "$(gh run list -R kody-w/openrappter-release-train --workflow observe-main.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 
-request_path="$(gh api repos/kody-w/openrappter-release-train/contents/requests/nightly \
-  --jq '.[].path' | sort | tail -1)"
+index="$(gh api repos/kody-w/openrappter-release-train/contents/request-index/nightly.json --jq .content | base64 --decode)"
+request_path="$(printf '%s' "$index" | jq -r '.entries[-1].path')"
+request_sequence="$(printf '%s' "$index" | jq -r '.entries[-1].sequence')"
 request_commit="$(gh api "repos/kody-w/openrappter-release-train/commits?path=$request_path&per_page=1" \
   --jq '.[0].sha')"
 
 gh workflow run apply-promotion.yml -R kody-w/openrappter-nightly \
-  -f request_commit="$request_commit" -f request_path="$request_path"
+  -F request_sequence="$request_sequence"
 gh run watch -R kody-w/openrappter-nightly \
   "$(gh run list -R kody-w/openrappter-nightly --workflow apply-promotion.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 gh workflow run finalize-promotion.yml -R kody-w/openrappter-release-train \
@@ -85,12 +89,13 @@ gh workflow run request-promotion.yml -R kody-w/openrappter-release-train \
 gh run watch -R kody-w/openrappter-release-train \
   "$(gh run list -R kody-w/openrappter-release-train --workflow request-promotion.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 
-request_path="$(gh api "repos/kody-w/openrappter-release-train/contents/requests/$target_ring" \
-  --jq '.[].path' | sort | tail -1)"
+index="$(gh api "repos/kody-w/openrappter-release-train/contents/request-index/$target_ring.json" --jq .content | base64 --decode)"
+request_path="$(printf '%s' "$index" | jq -r '.entries[-1].path')"
+request_sequence="$(printf '%s' "$index" | jq -r '.entries[-1].sequence')"
 request_commit="$(gh api "repos/kody-w/openrappter-release-train/commits?path=$request_path&per_page=1" \
   --jq '.[0].sha')"
 gh workflow run apply-promotion.yml -R "kody-w/openrappter-$target_ring" \
-  -f request_commit="$request_commit" -f request_path="$request_path"
+  -F request_sequence="$request_sequence"
 gh run watch -R "kody-w/openrappter-$target_ring" \
   "$(gh run list -R "kody-w/openrappter-$target_ring" --workflow apply-promotion.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 gh workflow run finalize-promotion.yml -R kody-w/openrappter-release-train \
@@ -101,6 +106,13 @@ gh run watch -R kody-w/openrappter-release-train \
 
 Each next request is accepted only after the preceding ring has a finalized
 immutable receipt. Stable remains a separate later decision.
+
+After merge, switch Pages from legacy `main/docs` to the receipted workflow:
+
+```sh
+gh api repos/kody-w/openrappter/pages --method PUT \
+  --input <(printf '%s\n' '{"build_type":"workflow"}')
+```
 
 Latest-state authority is `heads/<ring>.json`, not a target repository's
 mutable `main`. Each head advances a monotonic sequence and names one immutable

@@ -43,6 +43,10 @@ jobs:
           artifact_url="https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/candidates/$head/$artifact_sha.tar.gz"
           curl -fsSL --proto '=https' "$artifact_url" -o candidate.tar.gz
           echo "$artifact_sha  candidate.tar.gz" | sha256sum -c -
+          mkdir candidate-check
+          tar -xzf candidate.tar.gz -C candidate-check
+          cmp provenance.json candidate-check/provenance.json
+          (cd candidate-check && sha256sum -c SHA256SUMS)
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/nightly.json" \
             -o target-head.json

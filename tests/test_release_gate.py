@@ -19,10 +19,16 @@ class ReleaseConstitutionTests(unittest.TestCase):
             "source_commit": "a" * 40,
             "source_tag": "v2.0.0",
             "version": "2.0.0",
-            "artifact_url": "https://registry.npmjs.org/openrappter/-/openrappter-2.0.0.tgz",
-            "install_url": "https://registry.npmjs.org/openrappter/-/openrappter-2.0.0.tgz",
+            "artifact_url": (
+                f"https://raw.githubusercontent.com/kody-w/openrappter/"
+                f"{'c' * 40}/candidates/{'a' * 40}/{'b' * 64}.tar.gz"
+            ),
+            "install_url": (
+                f"https://raw.githubusercontent.com/kody-w/openrappter/"
+                f"{'c' * 40}/candidates/{'a' * 40}/{'b' * 64}.tar.gz"
+            ),
             "artifact_sha256": "b" * 64,
-            "artifact_provenance": "npm-registry-download-sha256",
+            "artifact_provenance": "github-candidate-bundle-sha256",
             "rollback_receipt": None,
         }
         self.chain = []

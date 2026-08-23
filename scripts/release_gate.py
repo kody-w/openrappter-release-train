@@ -82,6 +82,8 @@ def validate_chain(
     policy: dict,
 ) -> None:
     value = validate_release(release)
+    if value["artifact_provenance"] != "github-candidate-bundle-sha256":
+        raise ConstitutionError("distribution must publish the finalized immutable candidate bundle bytes")
     load_order = [item.get("ring") for item in chain]
     if load_order != list(ORDER):
         raise ConstitutionError(f"receipt order must be {' -> '.join(ORDER)}")

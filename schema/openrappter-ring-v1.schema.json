@@ -58,7 +58,8 @@
           "enum": [
             "github-commit-archive-sha256",
             "npm-registry-download-sha256",
-            "github-release-download-sha256"
+            "github-release-download-sha256",
+            "github-candidate-bundle-sha256"
           ]
         }
       }
