@@ -72,46 +72,29 @@ def prepare(args: argparse.Namespace) -> None:
     )
 
 
-def receipt(args: argparse.Namespace) -> None:
-    pointer_payload = json.loads(Path(args.payload).read_text())
-    expected = {
-        "authority_repository", "authority_commit", "receipt_path",
-        "receipt_sha256", "promotion_id", "target_manifest_commit",
-    }
-    if not isinstance(pointer_payload, dict) or set(pointer_payload) != expected:
-        raise ManifestError("receipt acknowledgement payload is not closed")
-    if pointer_payload["authority_repository"] != "kody-w/openrappter-release-train":
-        raise ManifestError("receipt authority repository is not allowlisted")
-    for field in ("authority_commit", "target_manifest_commit"):
-        value = pointer_payload[field]
-        if not isinstance(value, str) or len(value) != 40 or any(c not in "0123456789abcdef" for c in value):
-            raise ManifestError(f"{field} is not immutable 40-hex")
-    receipt_value = json.loads(Path(args.receipt).read_text())
-    if digest(receipt_value) != pointer_payload["receipt_sha256"]:
-        raise ManifestError("immutable receipt checksum mismatch")
+def acknowledge(args: argparse.Namespace) -> None:
+    request = validate_payload(json.loads(Path(args.request).read_text()))
     current = json.loads(Path(args.current).read_text())
-    immutable = json.loads(Path(args.immutable).read_text())
-    validate_receipt(
-        receipt_value,
-        target_repository=args.target_repository,
-        target_ring=args.target_ring,
-        current_manifest=current,
-        immutable_manifest=immutable,
-    )
-    if receipt_value["target_manifest_commit"] != pointer_payload["target_manifest_commit"]:
-        raise ManifestError("receipt target manifest commit mismatch")
-    if pointer_payload["promotion_id"] != receipt_value["promotion_id"]:
-        raise ManifestError("receipt promotion id mismatch")
-    authority = {
-        "schema": "openrappter-ring-authority/v1",
-        "authority_repository": pointer_payload["authority_repository"],
-        "authority_commit": pointer_payload["authority_commit"],
-        "receipt_path": pointer_payload["receipt_path"],
-        "receipt_sha256": pointer_payload["receipt_sha256"],
-        "promotion_id": pointer_payload["promotion_id"],
+    validate_manifest(current, expected_ring=args.target_ring)
+    if current != request["target_manifest"]:
+        raise ManifestError("applied manifest differs from immutable request")
+    if args.target_repository != request["target_repository"]:
+        raise ManifestError("request target repository mismatch")
+    if len(args.request_commit) != 40 or len(args.target_manifest_commit) != 40:
+        raise ManifestError("request/target commit must be immutable 40-hex")
+    ack = {
+        "schema": "openrappter-applied-request/v1",
+        "request_id": request["promotion_id"],
+        "request_sha256": digest(request),
+        "request_authority_commit": args.request_commit,
+        "request_path": args.request_path,
+        "target_repository": args.target_repository,
+        "target_ring": args.target_ring,
+        "target_manifest_sha256": digest(current),
+        "target_manifest_commit": args.target_manifest_commit,
     }
-    Path(args.output).write_text(json.dumps(authority, indent=2, sort_keys=True) + "\n")
-    write_output(authority_sha256=digest(authority))
+    Path(args.output).write_text(json.dumps(ack, indent=2, sort_keys=True) + "\n")
+    write_output(ack_sha256=digest(ack))
 
 
 def main() -> int:
@@ -120,15 +103,15 @@ def main() -> int:
     prepare_parser = sub.add_parser("prepare")
     for name in ("payload", "current", "output", "target-ring", "target-repository", "current-head"):
         prepare_parser.add_argument(f"--{name}", required=True)
-    receipt_parser = sub.add_parser("receipt")
+    receipt_parser = sub.add_parser("acknowledge")
     for name in (
-        "payload", "receipt", "current", "immutable", "output",
-        "target-ring", "target-repository",
+        "request", "request-commit", "request-path", "current",
+        "target-manifest-commit", "output", "target-ring", "target-repository",
     ):
         receipt_parser.add_argument(f"--{name}", required=True)
     args = parser.parse_args()
     try:
-        prepare(args) if args.command == "prepare" else receipt(args)
+        prepare(args) if args.command == "prepare" else acknowledge(args)
     except (OSError, json.JSONDecodeError, ManifestError, ValueError) as exc:
         print(f"target-receiver: {exc}", file=sys.stderr)
         return 1

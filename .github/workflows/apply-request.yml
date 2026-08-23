@@ -1,0 +1,76 @@
+name: Apply immutable promotion request
+on:
+  workflow_call:
+    inputs:
+      request_commit: { required: true, type: string }
+      request_path: { required: true, type: string }
+      target_ring: { required: true, type: string }
+      target_repository: { required: true, type: string }
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main, path: target }
+      - uses: actions/checkout@v4
+        with:
+          repository: kody-w/openrappter-release-train
+          ref: ${{ inputs.request_commit }}
+          path: authority
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_COMMIT: ${{ inputs.request_commit }}
+          REQUEST_PATH: ${{ inputs.request_path }}
+          TARGET_RING: ${{ inputs.target_ring }}
+          TARGET_REPOSITORY: ${{ inputs.target_repository }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REQUEST_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+          printf '%s' "$REQUEST_PATH" | grep -Eq "^requests/$TARGET_RING/[0-9a-f]{64}\.json$"
+          cp "authority/$REQUEST_PATH" request.json
+          head="$(git -C target rev-parse HEAD)"
+          python authority/scripts/target_receiver.py prepare \
+            --payload request.json --current target/.ring/manifest.json \
+            --output proposed.json --target-ring "$TARGET_RING" \
+            --target-repository "$TARGET_REPOSITORY" --current-head "$head"
+          git clone --filter=blob:none https://github.com/kody-w/openrappter.git canonical
+          previous="$(python -c 'import json; print(json.load(open("request.json"))["target_previous_source_commit"])')"
+          proposed="$(python -c 'import json; print(json.load(open("request.json"))["source_commit"])')"
+          tag="$(python -c 'import json; print(json.load(open("request.json"))["source_tag"] or "")')"
+          git -C canonical merge-base --is-ancestor "$previous" "$proposed"
+          git -C canonical merge-base --is-ancestor "$proposed" origin/main
+          if [ -n "$tag" ]; then test "$(git -C canonical rev-list -n 1 "$tag")" = "$proposed"; fi
+          artifact_url="$(python -c 'import json; print(json.load(open("request.json"))["artifact_url"])')"
+          artifact_sha="$(python -c 'import json; print(json.load(open("request.json"))["artifact_sha256"])')"
+          curl -fsSL --proto '=https' "$artifact_url" -o artifact
+          echo "$artifact_sha  artifact" | sha256sum -c -
+          current_digest="$(python -c 'import json,hashlib; v=json.load(open("target/.ring/manifest.json")); print(hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest())')"
+          proposed_digest="$(python -c 'import json; print(json.load(open("request.json"))["target_manifest_sha256"])')"
+          if [ "$current_digest" != "$proposed_digest" ]; then
+            blob="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json?ref=main" --jq .sha)"
+            content="$(base64 < proposed.json | tr -d '\n')"
+            gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json" --method PUT \
+              -f "message=ring: apply request" -f content="$content" \
+              -f sha="$blob" -f branch=main
+          fi
+          target_commit="$(gh api "repos/$TARGET_REPOSITORY/commits?path=.ring/manifest.json&per_page=1" --jq '.[0].sha')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/$TARGET_REPOSITORY/$target_commit/.ring/manifest.json" \
+            -o applied-manifest.json
+          python authority/scripts/target_receiver.py acknowledge \
+            --request request.json --request-commit "$REQUEST_COMMIT" \
+            --request-path "$REQUEST_PATH" --current applied-manifest.json \
+            --target-manifest-commit "$target_commit" --output applied.json \
+            --target-ring "$TARGET_RING" --target-repository "$TARGET_REPOSITORY"
+          existing="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json?ref=main" --jq .sha 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json?ref=main" --jq .content \
+              | base64 --decode > existing-applied.json
+            if cmp -s existing-applied.json applied.json; then exit 0; fi
+          fi
+          content="$(base64 < applied.json | tr -d '\n')"
+          args=(--method PUT -f "message=ring: acknowledge request" -f "content=$content" -f branch=main)
+          if [ -n "$existing" ]; then args+=(-f "sha=$existing"); fi
+          gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied.json" "${args[@]}"

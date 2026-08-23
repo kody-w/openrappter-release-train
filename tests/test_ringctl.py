@@ -17,7 +17,7 @@ from ringctl import (  # noqa: E402
     validate_promotion,
     validate_receipt,
 )
-from target_receiver import prepare, receipt  # noqa: E402
+from target_receiver import acknowledge, prepare  # noqa: E402
 
 
 class Args:
@@ -180,28 +180,20 @@ class RingAuthorityTests(unittest.TestCase):
             current_manifest=applied,
             immutable_manifest=applied,
         )
-        receipt_path = self.work / "receipt.json"
-        immutable_path = self.work / "immutable.json"
-        pointer_payload = self.work / "pointer.json"
-        authority_out = self.work / "authority.json"
-        receipt_path.write_text(json.dumps(receipt_value))
-        immutable_path.write_text(json.dumps(applied))
-        pointer_payload.write_text(json.dumps({
-            "authority_repository": "kody-w/openrappter-release-train",
-            "authority_commit": "1" * 40,
-            "receipt_path": f"receipts/alpha/{payload['promotion_id']}.json",
-            "receipt_sha256": digest(receipt_value),
-            "promotion_id": payload["promotion_id"],
-            "target_manifest_commit": target_commit,
-        }))
-        receipt_args = Args()
-        receipt_args.payload, receipt_args.receipt = str(pointer_payload), str(receipt_path)
-        receipt_args.current, receipt_args.immutable = str(current_path), str(immutable_path)
-        receipt_args.output = str(authority_out)
-        receipt_args.target_ring = "alpha"
-        receipt_args.target_repository = "kody-w/openrappter-alpha"
-        receipt(receipt_args)
-        self.assertEqual(json.loads(authority_out.read_text())["promotion_id"], payload["promotion_id"])
+        ack_path = self.work / "applied.json"
+        ack_args = Args()
+        ack_args.request = str(payload_path)
+        ack_args.request_commit = "1" * 40
+        ack_args.request_path = f"requests/alpha/{payload['promotion_id']}.json"
+        ack_args.current = str(current_path)
+        ack_args.target_manifest_commit = target_commit
+        ack_args.output = str(ack_path)
+        ack_args.target_ring = "alpha"
+        ack_args.target_repository = "kody-w/openrappter-alpha"
+        acknowledge(ack_args)
+        ack = json.loads(ack_path.read_text())
+        self.assertEqual(ack["request_id"], payload["promotion_id"])
+        self.assertEqual(ack["request_sha256"], digest(payload))
 
     def test_failed_acknowledgement_creates_no_receipt_and_compromise_is_rejected(self):
         payload = self.plan()
@@ -227,13 +219,14 @@ class RingAuthorityTests(unittest.TestCase):
                 immutable_manifest=payload["target_manifest"],
             )
 
-    def test_workflows_poll_before_receipt_and_fail_without_secret(self):
-        promote = (ROOT / ".github/workflows/promote.yml").read_text()
-        receiver = (ROOT / ".github/workflows/receive.yml").read_text()
-        self.assertIn("target never acknowledged exact manifest", promote)
-        self.assertLess(promote.index("target never acknowledged"), promote.index("ringctl.py receipt"))
-        self.assertIn("RING_AUTHORITY_TOKEN is required", promote)
-        self.assertIn("contents: write", receiver)
+    def test_pull_workflows_use_only_repo_scoped_tokens(self):
+        workflows = "\n".join(
+            path.read_text() for path in (ROOT / ".github/workflows").glob("*.yml")
+        )
+        self.assertNotIn("RING_AUTHORITY_TOKEN", workflows)
+        self.assertNotIn("repository_dispatch", workflows)
+        self.assertIn("missing/mismatched target acknowledgement", workflows)
+        self.assertIn("contents: write", workflows)
 
 
 if __name__ == "__main__":

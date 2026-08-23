@@ -27,11 +27,13 @@ python scripts/ringctl.py promote path/to/nightly.json --to alpha
 python -m unittest discover -s tests -v
 ```
 
-Promotion advances exactly one ring, rejects version downgrade, can check Git
-ancestry, and emits a closed dispatch payload. The reusable
-`promote.yml` workflow refuses to dispatch unless `RING_AUTHORITY_TOKEN` is
-present. It does not invent or claim signatures: receipts preserve the SHA-256
-and GitHub provenance that was actually measured.
+Promotion is pull/observe only. `request-promotion.yml` validates and commits
+one immutable request with this repository's scoped `GITHUB_TOKEN`. A target's
+scheduled/manual workflow reads that exact request and writes only its own
+repository. `finalize-promotion.yml` observes the target acknowledgement and
+commits one receipt here. No PAT, shared secret, or cross-repository write token
+exists. Requests are not trusted by clients; only finalized immutable receipts
+authorize a manifest.
 
 Satellite repositories keep only their current manifest, validation, CI, and
 human semantics. Source and build work remains canonical.

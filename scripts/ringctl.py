@@ -231,7 +231,11 @@ def validate_promotion(
     validate_manifest(previous_target, expected_ring=target_ring)
     if source["status"] != "published":
         raise ManifestError("only a published predecessor can be promoted")
-    expected = RINGS[RINGS.index(source["ring"]) + 1] if source["ring"] != "stable" else None
+    expected = (
+        "nightly" if source["ring"] == "stable"
+        else RINGS[RINGS.index(source["ring"]) + 1]
+        if source["ring"] != "stable" else None
+    )
     if target_ring != expected:
         raise ManifestError(f"promotion must advance exactly one ring: {source['ring']} -> {expected}")
     if not HEX40.fullmatch(target_base_commit):
@@ -285,7 +289,7 @@ def validate_promotion(
         "version": source["version"],
         "artifact": source["artifact"],
         "promoted_at": source["promoted_at"],
-        "predecessor": source["ring"],
+        "predecessor": None if target_ring == "nightly" else source["ring"],
         "status": "published",
         "reason": None,
         "receipt": None,
@@ -332,7 +336,8 @@ def validate_payload(payload: object) -> dict:
         raise ManifestError("unknown promotion payload schema")
     if value["to"] not in RINGS or value["target_repository"] != REPOS[value["to"]]:
         raise ManifestError("promotion target is not allowlisted")
-    if value["from"] != (None if value["to"] == "nightly" else RINGS[RINGS.index(value["to"]) - 1]):
+    expected_from = "stable" if value["to"] == "nightly" else RINGS[RINGS.index(value["to"]) - 1]
+    if value["from"] != expected_from:
         raise ManifestError("promotion predecessor ring is invalid")
     for field in (
         "promotion_id", "target_previous_manifest_sha256",
@@ -469,12 +474,27 @@ def main() -> int:
     receipt.add_argument("--target-manifest-commit", required=True)
     receipt.add_argument("--emitted-at", required=True)
     receipt.add_argument("--out", required=True)
+    verify = sub.add_parser("verify-source")
+    for name in ("manifest", "receipt", "immutable", "repository", "ring"):
+        verify.add_argument(f"--{name}", required=True)
     args = parser.parse_args()
     try:
         if args.command == "validate":
             value = load(args.manifest)
             validate_manifest(value, expected_ring=args.ring)
             print(f"valid {value['ring']} manifest at {value['source']['commit']}")
+        elif args.command == "verify-source":
+            manifest = load(args.manifest)
+            receipt_value = load(args.receipt)
+            immutable = load(args.immutable)
+            validate_receipt(
+                receipt_value,
+                target_repository=args.repository,
+                target_ring=args.ring,
+                current_manifest=manifest,
+                immutable_manifest=immutable,
+            )
+            print(receipt_value["promotion_id"])
         elif args.command == "promote":
             payload = validate_promotion(
                 load(args.manifest),
