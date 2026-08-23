@@ -1,0 +1,54 @@
+name: Observe canonical main for nightly
+on:
+  workflow_dispatch:
+  schedule: [{ cron: '7,37 * * * *' }]
+permissions:
+  contents: write
+concurrency:
+  group: observe-openrappter-main
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(gh api repos/kody-w/openrappter/commits/main --jq .sha)"
+          committed_at="$(gh api repos/kody-w/openrappter/commits/$head --jq .commit.committer.date)"
+          gh api "repos/kody-w/openrappter/commits/$head/check-runs?per_page=100" \
+            -H "Accept: application/vnd.github+json" > checks.json
+          python scripts/observe_main.py verify --checks checks.json --head "$head" \
+            --policy config/required-main-checks.json
+          package_version="$(gh api "repos/kody-w/openrappter/contents/typescript/package.json?ref=$head" --jq .content | base64 --decode | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+          artifact_url="https://github.com/kody-w/openrappter/archive/$head.tar.gz"
+          curl -fsSL --proto '=https' "$artifact_url" -o source.tar.gz
+          artifact_sha="$(sha256sum source.tar.gz | cut -d' ' -f1)"
+          target_head="$(gh api repos/kody-w/openrappter-nightly/commits/main --jq .sha)"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-nightly/$target_head/.ring/manifest.json" \
+            -o previous.json
+          request_id="$(python scripts/observe_main.py build \
+            --head "$head" --package-version "$package_version" \
+            --committed-at "$committed_at" --artifact-sha256 "$artifact_sha" \
+            --previous-manifest previous.json --target-base-commit "$target_head" \
+            --output request.json)"
+          request_path="requests/nightly/$request_id.json"
+          if gh api "repos/kody-w/openrappter-release-train/contents/$request_path?ref=main" \
+              --jq .content 2>/dev/null | base64 --decode > existing.json; then
+            python - <<'PY'
+          import json
+          assert json.load(open("existing.json")) == json.load(open("request.json"))
+          PY
+            echo "verified head already requested: $head"
+            exit 0
+          fi
+          # Re-read main immediately before committing the request. A newer
+          # commit must be observed and checked on the next run.
+          test "$(gh api repos/kody-w/openrappter/commits/main --jq .sha)" = "$head"
+          content="$(base64 < request.json | tr -d '\n')"
+          gh api "repos/kody-w/openrappter-release-train/contents/$request_path" \
+            --method PUT -f "message=request: nightly verified $head" \
+            -f content="$content" -f branch=main
