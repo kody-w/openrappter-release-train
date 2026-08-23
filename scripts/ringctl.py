@@ -376,7 +376,7 @@ RECEIPT_KEYS = {
     "target_manifest_sha256", "target_manifest_commit", "source_repository",
     "source_commit", "source_tag", "version", "artifact_url", "install_url",
     "artifact_sha256", "artifact_provenance", "predecessor_manifest_sha256",
-    "emitted_at",
+    "emitted_at", "receipt_kind",
 }
 
 
@@ -391,6 +391,8 @@ def validate_receipt(
     value = _closed(receipt, RECEIPT_KEYS, "receipt")
     if value["schema"] != "openrappter-promotion-receipt/v1":
         raise ManifestError("unknown receipt schema")
+    if value["receipt_kind"] not in {"bootstrap", "promotion"}:
+        raise ManifestError("unknown receipt kind")
     if value["target_repository"] != target_repository or value["target_ring"] != target_ring:
         raise ManifestError("receipt authorizes a different target")
     validate_manifest(current_manifest, expected_ring=target_ring)
@@ -426,6 +428,7 @@ def make_receipt(
     validate_confirmation(payload, payload["target_manifest"], target_manifest_commit)
     return {
         "schema": "openrappter-promotion-receipt/v1",
+        "receipt_kind": "promotion",
         "promotion_id": payload["promotion_id"],
         "target_repository": payload["target_repository"],
         "target_ring": payload["to"],
