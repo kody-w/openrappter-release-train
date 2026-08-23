@@ -12,7 +12,9 @@ from ringctl import (  # noqa: E402
     ManifestError,
     compare_semver,
     digest,
+    make_head,
     make_receipt,
+    validate_applied,
     validate_manifest,
     validate_promotion,
     validate_receipt,
@@ -227,6 +229,53 @@ class RingAuthorityTests(unittest.TestCase):
         self.assertNotIn("repository_dispatch", workflows)
         self.assertIn("missing/mismatched target acknowledgement", workflows)
         self.assertIn("contents: write", workflows)
+
+    def test_applied_ack_and_monotonic_head_are_exact_and_idempotent(self):
+        payload = self.plan()
+        manifest = payload["target_manifest"]
+        ack = {
+            "schema": "openrappter-applied-request/v1",
+            "request_id": payload["promotion_id"],
+            "request_sha256": digest(payload),
+            "request_authority_commit": "1" * 40,
+            "request_path": f"requests/alpha/{payload['promotion_id']}.json",
+            "target_repository": payload["target_repository"],
+            "target_ring": "alpha",
+            "target_manifest_sha256": digest(manifest),
+            "target_manifest_commit": "2" * 40,
+        }
+        validate_applied(payload, ack, manifest)
+        for field, value in (
+            ("request_id", "f" * 64),
+            ("request_sha256", "f" * 64),
+            ("target_manifest_commit", "bad"),
+        ):
+            with self.assertRaises(ManifestError):
+                validate_applied(payload, {**ack, field: value}, manifest)
+        receipt_value = make_receipt(
+            payload,
+            target_manifest_commit=ack["target_manifest_commit"],
+            emitted_at="2026-08-23T20:00:00Z",
+        )
+        kwargs = {
+            "authority_commit": "3" * 40,
+            "receipt_path": f"receipts/alpha/{payload['promotion_id']}.json",
+            "receipt_sha256": digest(receipt_value),
+        }
+        head, changed = make_head(receipt_value, **kwargs)
+        self.assertTrue(changed)
+        self.assertEqual(head["sequence"], 1)
+        replay, changed = make_head(receipt_value, existing=head, **kwargs)
+        self.assertFalse(changed)
+        self.assertEqual(replay, head)
+
+    def test_finalize_validates_application_before_existing_receipt_success(self):
+        workflow = (ROOT / ".github/workflows/finalize-promotion.yml").read_text()
+        applied = workflow.index("ringctl.py validate-applied")
+        receipt_lookup = workflow.index("contents/$receipt_path?ref=main")
+        head_update = workflow.index('head_path="heads/$target_ring.json"')
+        self.assertLess(applied, receipt_lookup)
+        self.assertLess(receipt_lookup, head_update)
 
 
 if __name__ == "__main__":

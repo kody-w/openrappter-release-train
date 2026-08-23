@@ -150,36 +150,51 @@ def validate_chain(
             raise ConstitutionError("rollback artifact was not already fully receipted")
 
 
+def fetch_authority_head(ring: str) -> dict:
+    head = json.load(urllib.request.urlopen(
+        f"https://raw.githubusercontent.com/{AUTHORITY}/main/heads/{ring}.json"
+    ))
+    expected = {
+        "schema", "ring", "sequence", "promotion_id", "authority_commit",
+        "receipt_path", "receipt_sha256", "target_repository",
+        "target_manifest_commit", "target_manifest_sha256",
+    }
+    if (
+        not isinstance(head, dict)
+        or set(head) != expected
+        or head["schema"] != "openrappter-ring-head/v1"
+        or head["ring"] != ring
+        or not isinstance(head["sequence"], int)
+        or head["sequence"] < 1
+        or not HEX40.fullmatch(head["authority_commit"])
+        or head["receipt_path"] != f"receipts/{ring}/{head['promotion_id']}.json"
+    ):
+        raise ConstitutionError(f"{ring} authority head is malformed")
+    return head
+
+
 def fetch_chain(release: dict) -> list[dict]:
     chain = []
     for ring in ORDER:
-        api = (
-            f"https://api.github.com/repos/{AUTHORITY}/contents/receipts/{ring}?ref=main"
-        )
-        rows = json.load(urllib.request.urlopen(api))
-        match = None
-        for row in rows:
-            path = row["path"]
-            commit_rows = json.load(urllib.request.urlopen(
-                f"https://api.github.com/repos/{AUTHORITY}/commits?path={path}&per_page=1"
-            ))
-            if not commit_rows:
-                continue
-            authority_commit = commit_rows[0]["sha"]
-            receipt = json.load(urllib.request.urlopen(
-                f"https://raw.githubusercontent.com/{AUTHORITY}/{authority_commit}/{path}"
-            ))
-            if _identity(receipt) == _identity(release) and receipt.get("receipt_kind") == "promotion":
-                match = (authority_commit, path, receipt)
-                break
-        if not match:
-            raise ConstitutionError(f"no finalized {ring} receipt matches exact release")
-        authority_commit, path, receipt = match
-        target_repo = f"kody-w/openrappter-{ring}"
+        head = fetch_authority_head(ring)
+        authority_commit, path = head["authority_commit"], head["receipt_path"]
+        receipt = json.load(urllib.request.urlopen(
+            f"https://raw.githubusercontent.com/{AUTHORITY}/{authority_commit}/{path}"
+        ))
+        if _identity(receipt) != _identity(release) or receipt.get("receipt_kind") != "promotion":
+            raise ConstitutionError(f"latest finalized {ring} head does not match exact release")
+        target_repo = head["target_repository"]
         manifest = json.load(urllib.request.urlopen(
             f"https://raw.githubusercontent.com/{target_repo}/"
-            f"{receipt['target_manifest_commit']}/.ring/manifest.json"
+            f"{head['target_manifest_commit']}/.ring/manifest.json"
         ))
+        if (
+            receipt["promotion_id"] != head["promotion_id"]
+            or receipt["target_manifest_commit"] != head["target_manifest_commit"]
+            or receipt["target_manifest_sha256"] != head["target_manifest_sha256"]
+            or digest(receipt) != head["receipt_sha256"]
+        ):
+            raise ConstitutionError(f"{ring} authority head/receipt mismatch")
         chain.append({
             "ring": ring,
             "authority_commit": authority_commit,
@@ -191,31 +206,18 @@ def fetch_chain(release: dict) -> list[dict]:
 
 
 def discover_artifact(release: dict) -> dict:
-    rows = json.load(urllib.request.urlopen(
-        f"https://api.github.com/repos/{AUTHORITY}/contents/receipts/beta?ref=main"
+    head = fetch_authority_head("beta")
+    receipt = json.load(urllib.request.urlopen(
+        f"https://raw.githubusercontent.com/{AUTHORITY}/{head['authority_commit']}/{head['receipt_path']}"
     ))
-    matches = []
-    for row in rows:
-        path = row["path"]
-        commits = json.load(urllib.request.urlopen(
-            f"https://api.github.com/repos/{AUTHORITY}/commits?path={path}&per_page=1"
-        ))
-        if not commits:
-            continue
-        authority_commit = commits[0]["sha"]
-        receipt = json.load(urllib.request.urlopen(
-            f"https://raw.githubusercontent.com/{AUTHORITY}/{authority_commit}/{path}"
-        ))
-        if (
-            receipt.get("receipt_kind") == "promotion"
-            and receipt.get("source_commit") == release["source_commit"]
-            and receipt.get("source_tag") == release["source_tag"]
-            and receipt.get("version") == release["version"]
-        ):
-            matches.append(receipt)
-    if len(matches) != 1:
-        raise ConstitutionError("exactly one finalized beta artifact must match release identity")
-    receipt = matches[0]
+    if not (
+        receipt.get("receipt_kind") == "promotion"
+        and receipt.get("source_commit") == release["source_commit"]
+        and receipt.get("source_tag") == release["source_tag"]
+        and receipt.get("version") == release["version"]
+        and digest(receipt) == head["receipt_sha256"]
+    ):
+        raise ConstitutionError("latest finalized beta artifact does not match release identity")
     result = dict(release)
     for target, source in (
         ("artifact_url", "artifact_url"),

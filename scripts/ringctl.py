@@ -231,11 +231,7 @@ def validate_promotion(
     validate_manifest(previous_target, expected_ring=target_ring)
     if source["status"] != "published":
         raise ManifestError("only a published predecessor can be promoted")
-    expected = (
-        "nightly" if source["ring"] == "stable"
-        else RINGS[RINGS.index(source["ring"]) + 1]
-        if source["ring"] != "stable" else None
-    )
+    expected = RINGS[RINGS.index(source["ring"]) + 1] if source["ring"] != "stable" else None
     if target_ring != expected:
         raise ManifestError(f"promotion must advance exactly one ring: {source['ring']} -> {expected}")
     if not HEX40.fullmatch(target_base_commit):
@@ -336,7 +332,7 @@ def validate_payload(payload: object) -> dict:
         raise ManifestError("unknown promotion payload schema")
     if value["to"] not in RINGS or value["target_repository"] != REPOS[value["to"]]:
         raise ManifestError("promotion target is not allowlisted")
-    expected_from = "stable" if value["to"] == "nightly" else RINGS[RINGS.index(value["to"]) - 1]
+    expected_from = None if value["to"] == "nightly" else RINGS[RINGS.index(value["to"]) - 1]
     if value["from"] != expected_from:
         raise ManifestError("promotion predecessor ring is invalid")
     for field in (
@@ -383,6 +379,16 @@ RECEIPT_KEYS = {
     "artifact_sha256", "artifact_provenance", "predecessor_manifest_sha256",
     "emitted_at", "receipt_kind",
 }
+APPLIED_KEYS = {
+    "schema", "request_id", "request_sha256", "request_authority_commit",
+    "request_path", "target_repository", "target_ring",
+    "target_manifest_sha256", "target_manifest_commit",
+}
+HEAD_KEYS = {
+    "schema", "ring", "sequence", "promotion_id", "authority_commit",
+    "receipt_path", "receipt_sha256", "target_repository",
+    "target_manifest_commit", "target_manifest_sha256",
+}
 
 
 def validate_receipt(
@@ -422,6 +428,72 @@ def validate_receipt(
     if identity != manifest_identity:
         raise ManifestError("receipt source/artifact identity mismatch")
     return value
+
+
+def validate_applied(request: object, applied: object, target_manifest: object) -> dict:
+    payload = validate_payload(request)
+    ack = _closed(applied, APPLIED_KEYS, "applied acknowledgement")
+    manifest = validate_manifest(target_manifest, expected_ring=payload["to"])
+    if ack["schema"] != "openrappter-applied-request/v1":
+        raise ManifestError("unknown applied acknowledgement schema")
+    if (
+        ack["request_id"] != payload["promotion_id"]
+        or ack["request_sha256"] != digest(payload)
+        or ack["target_repository"] != payload["target_repository"]
+        or ack["target_ring"] != payload["to"]
+        or ack["target_manifest_sha256"] != payload["target_manifest_sha256"]
+        or ack["target_manifest_commit"] is None
+        or not HEX40.fullmatch(ack["target_manifest_commit"])
+        or manifest != payload["target_manifest"]
+        or digest(manifest) != ack["target_manifest_sha256"]
+    ):
+        raise ManifestError("target applied acknowledgement does not match request")
+    if not isinstance(ack["request_authority_commit"], str) or not HEX40.fullmatch(ack["request_authority_commit"]):
+        raise ManifestError("request authority commit is mutable")
+    expected_path = f"requests/{payload['to']}/{payload['promotion_id']}.json"
+    if ack["request_path"] != expected_path:
+        raise ManifestError("applied acknowledgement request path mismatch")
+    return ack
+
+
+def make_head(
+    receipt: object,
+    *,
+    authority_commit: str,
+    receipt_path: str,
+    receipt_sha256: str,
+    existing: object | None = None,
+) -> tuple[dict, bool]:
+    value = _closed(receipt, RECEIPT_KEYS, "receipt")
+    ring = value["target_ring"]
+    if ring not in RINGS or not HEX40.fullmatch(authority_commit) or not HEX64.fullmatch(receipt_sha256):
+        raise ManifestError("head authority identity is malformed")
+    if receipt_path != f"receipts/{ring}/{value['promotion_id']}.json":
+        raise ManifestError("head receipt path is not canonical")
+    base = {
+        "schema": "openrappter-ring-head/v1",
+        "ring": ring,
+        "promotion_id": value["promotion_id"],
+        "authority_commit": authority_commit,
+        "receipt_path": receipt_path,
+        "receipt_sha256": receipt_sha256,
+        "target_repository": value["target_repository"],
+        "target_manifest_commit": value["target_manifest_commit"],
+        "target_manifest_sha256": value["target_manifest_sha256"],
+    }
+    if existing is not None:
+        old = _closed(existing, HEAD_KEYS, "existing authority head")
+        if not isinstance(old["sequence"], int) or old["sequence"] < 1:
+            raise ManifestError("existing authority head sequence is invalid")
+        if old["promotion_id"] == value["promotion_id"]:
+            expected = {**base, "sequence": old["sequence"]}
+            if old != expected:
+                raise ManifestError("existing authority head conflicts with finalized receipt")
+            return old, False
+        sequence = old["sequence"] + 1
+    else:
+        sequence = 1
+    return {**base, "sequence": sequence}, True
 
 
 def make_receipt(
@@ -477,6 +549,13 @@ def main() -> int:
     verify = sub.add_parser("verify-source")
     for name in ("manifest", "receipt", "immutable", "repository", "ring"):
         verify.add_argument(f"--{name}", required=True)
+    applied_parser = sub.add_parser("validate-applied")
+    for name in ("request", "applied", "manifest"):
+        applied_parser.add_argument(f"--{name}", required=True)
+    head_parser = sub.add_parser("head")
+    for name in ("receipt", "authority-commit", "receipt-path", "receipt-sha256", "out"):
+        head_parser.add_argument(f"--{name}", required=True)
+    head_parser.add_argument("--existing")
     args = parser.parse_args()
     try:
         if args.command == "validate":
@@ -495,6 +574,21 @@ def main() -> int:
                 immutable_manifest=immutable,
             )
             print(receipt_value["promotion_id"])
+        elif args.command == "validate-applied":
+            ack = validate_applied(load(args.request), load(args.applied), load(args.manifest))
+            print(ack["target_manifest_commit"])
+        elif args.command == "head":
+            value, changed = make_head(
+                load(args.receipt),
+                authority_commit=args.authority_commit,
+                receipt_path=args.receipt_path,
+                receipt_sha256=args.receipt_sha256,
+                existing=load(args.existing) if args.existing else None,
+            )
+            with open(args.out, "w", encoding="utf-8") as handle:
+                json.dump(value, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+            print("changed" if changed else "unchanged")
         elif args.command == "promote":
             payload = validate_promotion(
                 load(args.manifest),

@@ -9,7 +9,7 @@ on:
       target_ring:
         required: true
         type: choice
-        options: [nightly, alpha, canary, beta, stable]
+        options: [alpha, canary, beta, stable]
 permissions:
   contents: write
 concurrency:

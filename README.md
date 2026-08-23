@@ -102,6 +102,13 @@ gh run watch -R kody-w/openrappter-release-train \
 Each next request is accepted only after the preceding ring has a finalized
 immutable receipt. Stable remains a separate later decision.
 
+Latest-state authority is `heads/<ring>.json`, not a target repository's
+mutable `main`. Each head advances a monotonic sequence and names one immutable
+receipt plus the exact target manifest commit it authorized. Finalization
+validates the target acknowledgement before creating or reusing a receipt, then
+repairs/advances the head idempotently. Ring-repository current files are
+informational mirrors only.
+
 Distribution is separately governed by
 [`RELEASE_CONSTITUTION.md`](RELEASE_CONSTITUTION.md). The named **Release
 Constitution** check must verify the exact finalized nightly→alpha→canary→beta

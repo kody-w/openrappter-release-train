@@ -11,6 +11,7 @@ from observe_main import (  # noqa: E402
     nightly_request_id,
     verify_green_head,
 )
+from ringctl import digest  # noqa: E402
 
 
 class ObserveMainTests(unittest.TestCase):
@@ -73,6 +74,18 @@ class ObserveMainTests(unittest.TestCase):
             promoted_at="2026-08-23T20:00:00Z",
         )
         self.assertEqual(first["promotion_id"], expected)
+        self.assertIsNone(first["from"])
+        self.assertEqual(set(first), {
+            "schema", "promotion_id", "from", "to", "target_repository",
+            "target_base_commit", "target_previous_manifest_sha256",
+            "target_previous_source_commit", "source_repository",
+            "source_commit", "source_tag", "version", "artifact_url",
+            "install_url", "artifact_sha256", "artifact_provenance",
+            "promoted_at", "predecessor_manifest_sha256", "target_manifest",
+            "target_manifest_sha256",
+        })
+        self.assertEqual(first["target_previous_manifest_sha256"], digest(self.previous))
+        self.assertEqual(first["target_previous_source_commit"], self.previous["source"]["commit"])
 
     def test_workflow_rechecks_exact_head_before_writing(self):
         workflow = (ROOT / ".github/workflows/observe-main.yml").read_text()
@@ -83,6 +96,8 @@ class ObserveMainTests(unittest.TestCase):
         self.assertLess(exact_check, write)
         self.assertNotIn("repository_dispatch", workflow)
         self.assertNotIn("secrets.", workflow)
+        self.assertIn("observe_main.py build", workflow)
+        self.assertNotIn("client_payload", workflow)
 
 
 if __name__ == "__main__":

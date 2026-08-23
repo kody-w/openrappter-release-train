@@ -74,7 +74,7 @@ def nightly_request_id(
         "promoted_at": promoted_at,
     }
     seed = {
-        "from": "stable",
+        "from": None,
         "to": "nightly",
         "target_repository": REPOS["nightly"],
         "source_repository": source_identity["repository"],
@@ -149,7 +149,7 @@ def build_request(
     request = {
         "schema": "openrappter-promotion/v1",
         "promotion_id": promotion_id,
-        "from": "stable",
+        "from": None,
         "to": "nightly",
         "target_repository": REPOS["nightly"],
         "target_base_commit": target_base_commit,

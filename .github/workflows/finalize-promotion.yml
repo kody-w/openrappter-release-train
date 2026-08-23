@@ -48,25 +48,43 @@ jobs:
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/$target_repo/$target_commit/.ring/manifest.json" \
             -o target.json
-          python - <<'PY'
-          import json,hashlib
-          q=json.load(open("request.json")); a=json.load(open("applied.json")); m=json.load(open("target.json"))
-          digest=lambda v:hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest()
-          assert m==q["target_manifest"]
-          assert digest(m)==q["target_manifest_sha256"]==a["target_manifest_sha256"]
-          assert a["target_repository"]==q["target_repository"] and a["target_ring"]==q["to"]
-          PY
+          verified_commit="$(python scripts/ringctl.py validate-applied \
+            --request request.json --applied applied.json --manifest target.json)"
+          test "$verified_commit" = "$target_commit"
           receipt_path="receipts/$target_ring/$request_id.json"
           emitted_at="$(gh api "repos/$target_repo/commits/$target_commit" --jq .commit.committer.date)"
           python scripts/ringctl.py receipt request.json \
             --target-manifest-commit "$target_commit" --emitted-at "$emitted_at" \
             --out receipt.json
+          receipt_created=false
           if gh api "repos/kody-w/openrappter-release-train/contents/$receipt_path?ref=main" \
               --jq .content 2>/dev/null | base64 --decode > existing.json; then
             cmp -s existing.json receipt.json
-            exit 0
+            authority_commit="$(gh api "repos/kody-w/openrappter-release-train/commits?path=$receipt_path&per_page=1" --jq '.[0].sha')"
+          else
+            content="$(base64 < receipt.json | tr -d '\n')"
+            gh api "repos/kody-w/openrappter-release-train/contents/$receipt_path" \
+              --method PUT -f "message=receipt: finalize $target_ring $request_id" \
+              -f content="$content" -f branch=main > receipt-result.json
+            authority_commit="$(python -c 'import json; print(json.load(open("receipt-result.json"))["commit"]["sha"])')"
+            receipt_created=true
           fi
-          content="$(base64 < receipt.json | tr -d '\n')"
-          gh api "repos/kody-w/openrappter-release-train/contents/$receipt_path" \
-            --method PUT -f "message=receipt: finalize $target_ring $request_id" \
-            -f content="$content" -f branch=main
+          receipt_sha="$(python -c 'import json,hashlib; v=json.load(open("receipt.json")); print(hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest())')"
+          head_path="heads/$target_ring.json"
+          existing_head_sha="$(gh api "repos/kody-w/openrappter-release-train/contents/$head_path?ref=main" --jq .sha 2>/dev/null || true)"
+          head_args=()
+          if [ -n "$existing_head_sha" ]; then
+            gh api "repos/kody-w/openrappter-release-train/contents/$head_path?ref=main" --jq .content \
+              | base64 --decode > existing-head.json
+            head_args+=(--existing existing-head.json)
+          fi
+          head_state="$(python scripts/ringctl.py head --receipt receipt.json \
+            --authority-commit "$authority_commit" --receipt-path "$receipt_path" \
+            --receipt-sha256 "$receipt_sha" --out head.json "${head_args[@]}")"
+          if [ "$head_state" = "changed" ]; then
+            content="$(base64 < head.json | tr -d '\n')"
+            api_args=(--method PUT -f "message=head: $target_ring $request_id" -f "content=$content" -f branch=main)
+            if [ -n "$existing_head_sha" ]; then api_args+=(-f "sha=$existing_head_sha"); fi
+            gh api "repos/kody-w/openrappter-release-train/contents/$head_path" "${api_args[@]}"
+          fi
+          echo "finalized receipt=$receipt_created head=$head_state"
