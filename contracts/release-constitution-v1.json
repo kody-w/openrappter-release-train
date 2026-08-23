@@ -16,6 +16,8 @@
     "same_exact_commit": true,
     "same_exact_version": true,
     "same_exact_artifact_sha256": true,
+    "candidate_bundle_required": true,
+    "no_rebuild_after_beta": true,
     "all_rings_published": true,
     "allow_skip": false
   },

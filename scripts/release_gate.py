@@ -254,6 +254,13 @@ def verify_candidate_bytes(release: dict, local_dir: Path) -> None:
                     raise ConstitutionError("candidate archive path traversal")
             archive.extractall(extracted, filter="data")
         provenance = json.loads((extracted / "provenance.json").read_text())
+        if (
+            provenance.get("candidate_kind") != "release"
+            or provenance.get("release_tag") != release["source_tag"]
+            or provenance.get("source_commit") != release["source_commit"]
+            or provenance.get("version") != release["version"]
+        ):
+            raise ConstitutionError("snapshot or mismatched candidate cannot be distributed")
         matched = []
         for row in provenance["files"]:
             name = row["path"]

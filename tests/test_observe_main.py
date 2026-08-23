@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from observe_main import (  # noqa: E402
     ObservationError,
     build_request,
+    candidate_fields,
     nightly_request_id,
     verify_green_head,
 )
@@ -142,6 +143,26 @@ class ObserveMainTests(unittest.TestCase):
             self.assertRegex(fields[3], rf"/{'c' * 64}\.tar\.gz$")
         finally:
             __import__("shutil").rmtree(work, ignore_errors=True)
+
+    def test_candidate_bundle_count_and_sha_fail_closed(self):
+        provenance = {
+            "schema": "openrappter-candidate-provenance/v1",
+            "channel": "candidate",
+            "stable": False,
+            "candidate_kind": "snapshot",
+            "release_tag": None,
+            "source_commit": self.head,
+            "version": "2.0.0",
+        }
+        with self.assertRaisesRegex(ObservationError, "exactly one"):
+            candidate_fields(provenance, [], self.head, "b" * 40)
+        with self.assertRaisesRegex(ObservationError, "exactly one"):
+            candidate_fields(
+                provenance,
+                [f"{'c' * 64}.tar.gz", f"{'d' * 64}.tar.gz"],
+                self.head,
+                "b" * 40,
+            )
 
 
 if __name__ == "__main__":
