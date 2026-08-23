@@ -1,48 +1,37 @@
 # OpenRappter Release Train
 
-Flight deck for the OpenRappter release rings. Static files only — no server,
-no build step.
+This repository is the authority for five maintained **pointers**, not five
+copies of OpenRappter:
 
-    canary -> nightly -> alpha -> beta -> stable
-
-Dashboard: https://kody-w.github.io/openrappter-release-train/
-
-## Rings
-
-| Ring | npm dist-tag | Cut by |
-|---|---|---|
-| canary | `canary` | every push to `main` |
-| nightly | `nightly` | daily, only when `main` moved |
-| alpha | `alpha` | hand-promoted from nightly |
-| beta | `beta` | hand-promoted from alpha |
-| stable | `latest` | released via `release.yml` |
-
-Only `stable` owns `latest`, so a plain `npm install -g openrappter` can never
-receive a prerelease.
-
-## Install a ring
-
-```sh
-curl -fsSL https://kody-w.github.io/openrappter/install.sh | bash -s -- --channel beta
+```
+nightly -> alpha -> canary -> beta -> stable
 ```
 
-The ring is remembered in `~/.openrappter/channel`, so upgrades stay on the
-same train car. An exact `OPENRAPPTER_VERSION` always wins over the ring.
+* **nightly** is a vetted snapshot of canonical `main`.
+* **alpha** is an explicit early promotion selected from nightly.
+* **canary** requires a real smoke test or limited rollout of that exact source.
+* **beta** is a prerelease candidate.
+* **stable** is the production release in `kody-w/openrappter`.
 
-## Promotion
+Every pointer uses the closed `openrappter-ring/v1` contract in
+[`schema/openrappter-ring-v1.schema.json`](schema/openrappter-ring-v1.schema.json).
+Release identity is an exact 40-hex canonical commit, optional immutable tag,
+exact version, artifact URL, and SHA-256. A branch URL such as `main` is never a
+release identity.
 
-Promotion re-points an npm dist-tag at an already published version. It never
-rebuilds and never republishes — the bytes that enter at canary are the bytes
-that reach stable. `stable` is deliberately not reachable by dist-tag
-promotion; shipping stable means publishing the real release version.
+## Validate and promote
 
-## Static API
+```sh
+python scripts/ringctl.py validate path/to/manifest.json --ring nightly
+python scripts/ringctl.py promote path/to/nightly.json --to alpha
+python -m unittest discover -s tests -v
+```
 
-| Endpoint | Purpose |
-|---|---|
-| `api/v1/channels.json` | ring → dist-tag → version + install commands |
-| `api/v1/registry.json` | train topology and source repo |
-| `api/v1/status.json` | per-ring occupancy |
+Promotion advances exactly one ring, rejects version downgrade, can check Git
+ancestry, and emits a closed dispatch payload. The reusable
+`promote.yml` workflow refuses to dispatch unless `RING_AUTHORITY_TOKEN` is
+present. It does not invent or claim signatures: receipts preserve the SHA-256
+and GitHub provenance that was actually measured.
 
-Regenerated from the live npm registry by `scripts/ring-cli.mjs manifest`
-in [kody-w/openrappter](https://github.com/kody-w/openrappter).
+Satellite repositories keep only their current manifest, validation, CI, and
+human semantics. Source and build work remains canonical.

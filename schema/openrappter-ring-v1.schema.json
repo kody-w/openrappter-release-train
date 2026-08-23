@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kody-w/openrappter-release-train/blob/main/schema/openrappter-ring-v1.schema.json",
+  "title": "OpenRappter release ring manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "ring",
+    "source",
+    "version",
+    "artifact",
+    "promoted_at",
+    "predecessor",
+    "status",
+    "reason",
+    "receipt"
+  ],
+  "properties": {
+    "schema": { "const": "openrappter-ring/v1" },
+    "ring": {
+      "enum": ["stable", "beta", "canary", "alpha", "nightly"]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "tag"],
+      "properties": {
+        "repository": { "const": "kody-w/openrappter" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tag": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^v[0-9][0-9A-Za-z.+-]*$" }
+          ]
+        }
+      }
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "install_url", "sha256", "provenance"],
+      "properties": {
+        "url": { "type": "string", "pattern": "^https://" },
+        "install_url": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^https://" }
+          ]
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "provenance": {
+          "enum": [
+            "github-commit-archive-sha256",
+            "npm-registry-download-sha256"
+          ]
+        }
+      }
+    },
+    "promoted_at": { "type": "string", "format": "date-time" },
+    "predecessor": {
+      "oneOf": [
+        { "type": "null" },
+        { "enum": ["nightly", "alpha", "canary", "beta"] }
+      ]
+    },
+    "status": { "enum": ["published", "unpublished", "disabled"] },
+    "reason": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "minLength": 1 }
+      ]
+    },
+    "receipt": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^https://github\\.com/kody-w/openrappter-release-train/blob/[0-9a-f]{40}/receipts/"
+        }
+      ]
+    }
+  }
+}

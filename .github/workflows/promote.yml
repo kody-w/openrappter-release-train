@@ -1,0 +1,113 @@
+name: Promote immutable ring pointer
+
+on:
+  workflow_call:
+    inputs:
+      source_manifest_url:
+        required: true
+        type: string
+      target_ring:
+        required: true
+        type: string
+    secrets:
+      RING_AUTHORITY_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      source_manifest_url:
+        description: HTTPS URL of the predecessor manifest
+        required: true
+        type: string
+      target_ring:
+        description: alpha, canary, beta, or stable
+        required: true
+        type: choice
+        options: [alpha, canary, beta, stable]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ring-receipts
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail closed without cross-repository authority
+        env:
+          RING_AUTHORITY_TOKEN: ${{ secrets.RING_AUTHORITY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RING_AUTHORITY_TOKEN:-}" ]; then
+            echo "::error::RING_AUTHORITY_TOKEN is required; no dispatch occurred"
+            exit 1
+          fi
+      - name: Fetch and validate predecessor
+        env:
+          SOURCE_MANIFEST_URL: ${{ inputs.source_manifest_url }}
+          TARGET_RING: ${{ inputs.target_ring }}
+        run: |
+          set -euo pipefail
+          python - "$SOURCE_MANIFEST_URL" <<'PY'
+          import re, sys
+          pattern = (
+              r"https://raw\.githubusercontent\.com/kody-w/"
+              r"openrappter-(?:nightly|alpha|canary|beta)/[0-9a-f]{40}/"
+              r"\.ring/manifest\.json"
+          )
+          if not re.fullmatch(pattern, sys.argv[1]):
+              raise SystemExit("manifest URL must be an immutable allowlisted ring-repo URL")
+          PY
+          curl -fsSL --proto '=https' "$SOURCE_MANIFEST_URL" -o source-manifest.json
+          python scripts/ringctl.py validate source-manifest.json
+          artifact_url="$(python -c 'import json; print(json.load(open("source-manifest.json"))["artifact"]["url"])')"
+          artifact_sha="$(python -c 'import json; print(json.load(open("source-manifest.json"))["artifact"]["sha256"])')"
+          curl -fsSL --proto '=https' "$artifact_url" -o source-artifact
+          echo "$artifact_sha  source-artifact" | sha256sum -c -
+          git clone --filter=blob:none https://github.com/kody-w/openrappter.git canonical
+          target_repo="$(python - "$TARGET_RING" <<'PY'
+          import sys
+          ring = sys.argv[1]
+          print("kody-w/openrappter" if ring == "stable" else f"kody-w/openrappter-{ring}")
+          PY
+          )"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/$target_repo/main/.ring/manifest.json" \
+            -o previous-target.json
+          python scripts/ringctl.py promote source-manifest.json \
+            --to "$TARGET_RING" \
+            --previous previous-target.json \
+            --checkout canonical > payload.json
+      - name: Dispatch exact closed payload
+        env:
+          GH_TOKEN: ${{ secrets.RING_AUTHORITY_TOKEN }}
+        run: |
+          set -euo pipefail
+          target="$(python -c 'import json; print(json.load(open("payload.json"))["target_repository"])')"
+          gh api "repos/$target/dispatches" --method POST \
+            -f event_type=ring-promotion \
+            -F "client_payload[source_commit]=$(python -c 'import json; print(json.load(open("payload.json"))["source_commit"])')" \
+            -F "client_payload[source_tag]=$(python -c 'import json; print(json.load(open("payload.json"))["source_tag"] or "")')" \
+            -F "client_payload[version]=$(python -c 'import json; print(json.load(open("payload.json"))["version"])')" \
+            -F "client_payload[artifact_url]=$(python -c 'import json; print(json.load(open("payload.json"))["artifact_url"])')" \
+            -F "client_payload[artifact_sha256]=$(python -c 'import json; print(json.load(open("payload.json"))["artifact_sha256"])')" \
+            -F "client_payload[predecessor_manifest_sha256]=$(python -c 'import json; print(json.load(open("payload.json"))["predecessor_manifest_sha256"])')"
+      - name: Commit append-only promotion receipt
+        env:
+          GH_TOKEN: ${{ secrets.RING_AUTHORITY_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          to="$(python -c 'import json; print(json.load(open("payload.json"))["to"])')"
+          receipt="receipts/$to/${RUN_ID}-${RUN_ATTEMPT}.json"
+          python scripts/ringctl.py receipt payload.json --out receipt.json
+          content="$(base64 < receipt.json | tr -d '\n')"
+          gh api "repos/kody-w/openrappter-release-train/contents/$receipt" \
+            --method PUT \
+            -f message="receipt: record immutable $to promotion ($RUN_ID/$RUN_ATTEMPT)" \
+            -f content="$content" \
+            -f branch=main
