@@ -20,7 +20,9 @@ class ReleaseRulesetSetupTests(unittest.TestCase):
         parameters = pull_request["parameters"]
         self.assertEqual(parameters["required_approving_review_count"], 0)
         self.assertFalse(parameters["require_code_owner_review"])
+        self.assertFalse(parameters["require_extra_approval_for_unattributed_changes"])
         self.assertFalse(parameters["require_last_push_approval"])
+        self.assertEqual(parameters["allowed_merge_methods"], ["merge"])
         status = next(
             rule for rule in value["rules"] if rule["type"] == "required_status_checks"
         )
