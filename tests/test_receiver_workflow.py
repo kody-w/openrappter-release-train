@@ -25,6 +25,8 @@ class ReceiverWorkflowContractTests(unittest.TestCase):
             'blob="$(git -C target rev-parse HEAD:.ring/manifest.json)"',
             workflow,
         )
+        self.assertIn("optional_content_sha()", workflow)
+        self.assertNotIn("--jq .sha 2>/dev/null || true", workflow)
 
 
 if __name__ == "__main__":
