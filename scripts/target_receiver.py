@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +30,32 @@ def write_output(**values: object) -> None:
             handle.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
 
 
+def previous_manifest_matches(current: dict, expected_digest: str) -> bool:
+    if digest(current) == expected_digest:
+        return True
+    if current.get("intended_release_tag") is not None or current.get("channel_version") is not None:
+        return False
+    legacy = dict(current)
+    legacy.pop("intended_release_tag", None)
+    legacy.pop("channel_version", None)
+    return digest(legacy) == expected_digest
+
+
+def require_ancestral_base(checkout: str | None, base: str, head: str) -> None:
+    if head == base:
+        return
+    if not checkout:
+        raise ManifestError("target base differs and no checkout was provided")
+    result = subprocess.run(
+        ["git", "-C", checkout, "merge-base", "--is-ancestor", base, head],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise ManifestError("authority target base is not an ancestor of target HEAD")
+
+
 def prepare(args: argparse.Namespace) -> None:
     payload = validate_payload(json.loads(Path(args.payload).read_text()))
     current = json.loads(Path(args.current).read_text())
@@ -38,6 +65,11 @@ def prepare(args: argparse.Namespace) -> None:
     proposed = payload["target_manifest"]
     proposed_digest = digest(proposed)
     current_digest = digest(current)
+    require_ancestral_base(
+        getattr(args, "target_checkout", None),
+        payload["target_base_commit"],
+        args.current_head,
+    )
     if current_digest == proposed_digest and current["promotion_id"] == payload["promotion_id"]:
         Path(args.output).write_text(json.dumps(proposed, indent=2, sort_keys=True) + "\n")
         write_output(
@@ -51,9 +83,7 @@ def prepare(args: argparse.Namespace) -> None:
             artifact_sha256=proposed["artifact"]["sha256"],
         )
         return
-    if args.current_head != payload["target_base_commit"]:
-        raise ManifestError("target HEAD changed after authority validation")
-    if current_digest != payload["target_previous_manifest_sha256"]:
+    if not previous_manifest_matches(current, payload["target_previous_manifest_sha256"]):
         raise ManifestError("target manifest changed after authority validation")
     if current["source"]["commit"] != payload["target_previous_source_commit"]:
         raise ManifestError("target source ancestry base changed")
@@ -104,6 +134,7 @@ def main() -> int:
     prepare_parser = sub.add_parser("prepare")
     for name in ("payload", "current", "output", "target-ring", "target-repository", "current-head"):
         prepare_parser.add_argument(f"--{name}", required=True)
+    prepare_parser.add_argument("--target-checkout")
     receipt_parser = sub.add_parser("acknowledge")
     for name in (
         "request", "request-commit", "request-path", "current",

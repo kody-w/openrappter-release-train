@@ -199,6 +199,70 @@ class RingAuthorityTests(unittest.TestCase):
         self.assertEqual(ack["request_id"], payload["promotion_id"])
         self.assertEqual(ack["request_sha256"], digest(payload))
 
+    def test_receiver_accepts_ancestral_base_and_null_identity_migration_only(self):
+        target = self.work / "target-drift"
+        shutil.rmtree(target, ignore_errors=True)
+        target.mkdir()
+        subprocess.run(["git", "-C", str(target), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(target), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(target), "config", "user.name", "Ring Test"], check=True)
+        (target / "manifest-marker").write_text("authority base")
+        subprocess.run(["git", "-C", str(target), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(target), "commit", "-qm", "authority base"], check=True)
+        base = subprocess.check_output(
+            ["git", "-C", str(target), "rev-parse", "HEAD"], text=True
+        ).strip()
+        (target / "workflow-marker").write_text("unrelated workflow change")
+        subprocess.run(["git", "-C", str(target), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(target), "commit", "-qm", "workflow change"], check=True)
+        tip = subprocess.check_output(
+            ["git", "-C", str(target), "rev-parse", "HEAD"], text=True
+        ).strip()
+
+        legacy = json.loads(json.dumps(self.previous))
+        legacy.pop("intended_release_tag")
+        legacy.pop("channel_version")
+        payload = validate_promotion(
+            self.source,
+            "alpha",
+            previous_target=legacy,
+            checkout=self.repo,
+            target_base_commit=base,
+        )
+        payload_path = self.work / "drift-payload.json"
+        current_path = self.work / "drift-current.json"
+        proposed_path = self.work / "drift-proposed.json"
+        payload_path.write_text(json.dumps(payload))
+        current = {**legacy, "intended_release_tag": None, "channel_version": None}
+        current_path.write_text(json.dumps(current))
+        args = Args()
+        args.payload, args.current, args.output = map(
+            str, (payload_path, current_path, proposed_path)
+        )
+        args.target_ring = "alpha"
+        args.target_repository = "kody-w/openrappter-alpha"
+        args.current_head = tip
+        args.target_checkout = str(target)
+        prepare(args)
+        self.assertEqual(json.loads(proposed_path.read_text()), payload["target_manifest"])
+
+        current_path.write_text(proposed_path.read_text())
+        args.current_head = "f" * 40
+        with self.assertRaisesRegex(ManifestError, "not an ancestor"):
+            prepare(args)
+
+        args.current_head = tip
+        current_path.write_text(json.dumps(current))
+        current["channel_version"] = "0.1.0-beta.11"
+        current_path.write_text(json.dumps(current))
+        with self.assertRaisesRegex(ManifestError, "manifest changed"):
+            prepare(args)
+        current["channel_version"] = None
+        current_path.write_text(json.dumps(current))
+        args.current_head = "f" * 40
+        with self.assertRaisesRegex(ManifestError, "not an ancestor"):
+            prepare(args)
+
     def test_failed_acknowledgement_creates_no_receipt_and_compromise_is_rejected(self):
         payload = self.plan()
         with self.assertRaises(ManifestError):
