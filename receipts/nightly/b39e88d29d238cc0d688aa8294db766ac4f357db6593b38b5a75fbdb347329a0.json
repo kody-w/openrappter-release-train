@@ -1,0 +1,22 @@
+{
+  "artifact_provenance": "github-candidate-bundle-sha256",
+  "artifact_sha256": "26deb0c7b6ac06f926339ba886eb4b5dbf5fd1a8c35108fff03e0ff2149f7abf",
+  "artifact_url": "https://raw.githubusercontent.com/kody-w/openrappter/818cf984dc7a6f66450b9928dbefd2355f2723f6/candidates/21e9dd8ec034ed510bef6a16823d2a556ecbef77/snapshot/nightly-20260824-0328/26deb0c7b6ac06f926339ba886eb4b5dbf5fd1a8c35108fff03e0ff2149f7abf.tar.gz",
+  "channel_version": "0.1.0-beta.11",
+  "emitted_at": "2026-08-24T04:14:19Z",
+  "install_url": null,
+  "intended_release_tag": null,
+  "predecessor_manifest_sha256": "ab5d620f760bda3ac319a1a2da7a6c48c8d811d3125b818b5cfc33eb3c7aeb48",
+  "promotion_id": "b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0",
+  "receipt_kind": "promotion",
+  "schema": "openrappter-promotion-receipt/v1",
+  "sequence": 2,
+  "source_commit": "21e9dd8ec034ed510bef6a16823d2a556ecbef77",
+  "source_repository": "kody-w/openrappter",
+  "source_tag": null,
+  "target_manifest_commit": "28583c5e45c28a751a09cbd962bd764342f7461b",
+  "target_manifest_sha256": "e05d295a5a3a0da96cbf0aef2d523c72ed69fb9b848a36d7fcdef92c3bb289c4",
+  "target_repository": "kody-w/openrappter-nightly",
+  "target_ring": "nightly",
+  "version": "1.13.0"
+}
