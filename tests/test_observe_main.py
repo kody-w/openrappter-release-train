@@ -1,4 +1,6 @@
 import json
+import hashlib
+import tarfile
 import sys
 import subprocess
 import unittest
@@ -15,6 +17,8 @@ from observe_main import (  # noqa: E402
     verify_green_head,
 )
 from ringctl import digest  # noqa: E402
+from ringctl import make_head, make_receipt  # noqa: E402
+from target_receiver import prepare  # noqa: E402
 
 
 class ObserveMainTests(unittest.TestCase):
@@ -63,7 +67,8 @@ class ObserveMainTests(unittest.TestCase):
             "committed_at": "2026-08-23T20:00:00Z",
             "artifact_url": (
                 f"https://raw.githubusercontent.com/kody-w/openrappter/"
-                f"{'b' * 40}/candidates/{self.head}/{'c' * 64}.tar.gz"
+                f"{'b' * 40}/candidates/{self.head}/release/"
+                f"tag-djIuMC4w/{'c' * 64}.tar.gz"
             ),
             "artifact_sha256": "c" * 64,
             "previous_manifest": self.previous,
@@ -128,14 +133,14 @@ class ObserveMainTests(unittest.TestCase):
                 "channel": "candidate",
                 "stable": False,
                 "candidate_kind": "release",
-                "candidate_id": "v2.0.0",
+                "candidate_id": "tag-djIuMC4w",
                 "source_tag": None,
                 "intended_release_tag": "v2.0.0",
                 "source_commit": self.head,
                 "versions": {"npm": "2.0.0", "pypi": "2.0.0", "runtime": "2.0.0", "channel": "2.0.0"},
             }
             (work / "provenance.json").write_text(json.dumps(provenance))
-            entry = {"id": "v2.0.0", "bundle_sha256": "c" * 64, "path": f"candidates/{self.head}/release/v2.0.0", "provenance_path": "unused", "source_date_epoch": 1}
+            entry = {"id": "tag-djIuMC4w", "bundle_sha256": "c" * 64, "path": f"candidates/{self.head}/release/tag-djIuMC4w", "provenance_path": "unused", "source_date_epoch": 1}
             (work / "entry.json").write_text(json.dumps(entry))
             result = subprocess.run(
                 [
@@ -177,13 +182,72 @@ class ObserveMainTests(unittest.TestCase):
                 {"id": "s1", "source_date_epoch": 1},
                 {"id": "s2", "source_date_epoch": 2},
             ],
-            "releases": [{"id": "v0.1.0-beta.11", "source_date_epoch": 1}],
+            "releases": [{"id": "tag-djEuMTMuMA", "source_date_epoch": 1}],
         }
         self.assertEqual(select_candidate(index, "snapshot", None)["id"], "s2")
         self.assertEqual(select_candidate(index, "snapshot", "s1")["id"], "s1")
-        self.assertEqual(select_candidate(index, "release", "v0.1.0-beta.11")["id"], "v0.1.0-beta.11")
+        self.assertEqual(select_candidate(index, "release", "tag-djEuMTMuMA")["id"], "tag-djEuMTMuMA")
         with self.assertRaisesRegex(ObservationError, "not found"):
             select_candidate(index, "release", "missing")
+
+    def test_real_namespaced_release_candidate_flows_to_receipt_and_head(self):
+        work = ROOT / "tests/.candidate-e2e"
+        __import__("shutil").rmtree(work, ignore_errors=True)
+        work.mkdir()
+        try:
+            (work / "artifact.txt").write_text("exact candidate bytes\n")
+            bundle = work / "candidate.tar.gz"
+            with tarfile.open(bundle, "w:gz") as archive:
+                archive.add(work / "artifact.txt", arcname="artifact.txt")
+            sha = hashlib.sha256(bundle.read_bytes()).hexdigest()
+            candidate_id = "tag-djIuMC4w"
+            entry = {
+                "id": candidate_id, "bundle_sha256": sha,
+                "path": f"candidates/{self.head}/release/{candidate_id}",
+                "provenance_path": "provenance.json", "source_date_epoch": 1,
+            }
+            provenance = {
+                "schema": "openrappter-candidate-provenance/v1", "channel": "candidate",
+                "stable": False, "candidate_kind": "release", "candidate_id": candidate_id,
+                "source_tag": None, "intended_release_tag": "v2.0.0",
+                "source_commit": self.head,
+                "versions": {"npm": "2.0.0", "pypi": "2.0.0", "runtime": "2.0.0", "channel": "0.1.0-beta.11"},
+            }
+            version, kind, intended, url, channel, source_tag = candidate_fields(
+                provenance, entry, self.head, "b" * 40
+            )
+            request = build_request(
+                head=self.head, package_version=version,
+                committed_at="2026-08-23T20:00:00Z", artifact_url=url,
+                artifact_sha256=sha, previous_manifest=self.previous,
+                target_base_commit="d" * 40, sequence=2,
+                release_tag=intended, candidate_kind=kind,
+                source_tag=None if source_tag == "-" else source_tag,
+                channel_version=channel,
+            )
+            request_path = work / "request.json"; current = work / "current.json"
+            proposed = work / "proposed.json"
+            request_path.write_text(json.dumps(request)); current.write_text(json.dumps(self.previous))
+            args = type("Args", (), {
+                "payload": str(request_path), "current": str(current), "output": str(proposed),
+                "target_ring": "nightly", "target_repository": "kody-w/openrappter-nightly",
+                "current_head": "d" * 40,
+            })()
+            prepare(args)
+            receipt = make_receipt(
+                request, target_manifest_commit="e" * 40,
+                emitted_at="2026-08-23T20:01:00Z",
+            )
+            head, changed = make_head(
+                receipt, authority_commit="f" * 40,
+                receipt_path=f"receipts/nightly/{request['promotion_id']}.json",
+                receipt_sha256=digest(receipt),
+            )
+            self.assertTrue(changed)
+            self.assertEqual(head["sequence"], 2)
+            self.assertEqual(receipt["artifact_url"], url)
+        finally:
+            __import__("shutil").rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

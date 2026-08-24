@@ -24,6 +24,12 @@ The only publishable bytes are the inner files of the exact immutable
 and Pages jobs compare their local files against that bundle and never rebuild
 after the gate.
 
+Candidate URLs obey the closed `openrappter-candidate-url/v1` grammar:
+`https://raw.githubusercontent.com/kody-w/openrappter/<40hex-ref>/candidates/<40hex-source>/<snapshot|release>/<ASCII-candidate-id>/<64hex-sha>.tar.gz`.
+IDs are 1–128 ASCII characters matching `[A-Za-z0-9][A-Za-z0-9._-]*`;
+percent-encoding, Unicode, slashes, credentials, queries, fragments, extra
+segments, `.` and `..` are rejected.
+
 Local builds, tests, development, and the release-ring selector are outside
 this distribution gate. Prose explains the rule; `release_gate.py` and the
 static workflow tests enforce it.

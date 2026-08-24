@@ -23,11 +23,13 @@ class ReleaseConstitutionTests(unittest.TestCase):
             "version": "2.0.0",
             "artifact_url": (
                 f"https://raw.githubusercontent.com/kody-w/openrappter/"
-                f"{'c' * 40}/candidates/{'a' * 40}/{'b' * 64}.tar.gz"
+                f"{'c' * 40}/candidates/{'a' * 40}/release/"
+                f"tag-djIuMC4w/{'b' * 64}.tar.gz"
             ),
             "install_url": (
                 f"https://raw.githubusercontent.com/kody-w/openrappter/"
-                f"{'c' * 40}/candidates/{'a' * 40}/{'b' * 64}.tar.gz"
+                f"{'c' * 40}/candidates/{'a' * 40}/release/"
+                f"tag-djIuMC4w/{'b' * 64}.tar.gz"
             ),
             "artifact_sha256": "b" * 64,
             "artifact_provenance": "github-candidate-bundle-sha256",

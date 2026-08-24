@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from candidate_url import CandidateUrlError, parse_candidate_url
 
 SCHEMA = "openrappter-ring/v1"
 RINGS = ("nightly", "alpha", "canary", "beta", "stable")
@@ -124,7 +125,7 @@ def compare_semver(left: str, right: str) -> int:
     return 0
 
 
-def validate_artifact(artifact: object, version: str, tag: str | None, status: str) -> dict:
+def validate_artifact(artifact: object, version: str, tag: str | None, status: str, source_commit: str) -> dict:
     value = _closed(artifact, ARTIFACT_KEYS, "artifact")
     sha = value["sha256"]
     if not isinstance(sha, str) or not HEX64.fullmatch(sha):
@@ -136,15 +137,13 @@ def validate_artifact(artifact: object, version: str, tag: str | None, status: s
         expected = re.compile(
             r"https://github\.com/kody-w/openrappter/archive/[0-9a-f]{40}\.tar\.gz"
         )
-        candidate = (
-            provenance == "github-candidate-bundle-sha256"
-            and isinstance(url, str)
-            and re.fullmatch(
-                rf"https://raw\.githubusercontent\.com/kody-w/openrappter/"
-                rf"[0-9a-f]{{40}}/candidates/[0-9a-f]{{40}}/{re.escape(sha)}\.tar\.gz",
-                url,
-            )
-        )
+        candidate = False
+        if provenance == "github-candidate-bundle-sha256" and isinstance(url, str):
+            try:
+                parsed_candidate = parse_candidate_url(url)
+                candidate = parsed_candidate["source_commit"] == source_commit and parsed_candidate["sha256"] == sha
+            except CandidateUrlError:
+                candidate = False
         archive = provenance == "github-commit-archive-sha256" and isinstance(url, str) and expected.fullmatch(url)
         if not (candidate or archive):
             raise ManifestError("non-published artifact must be an exact canonical commit archive")
@@ -166,16 +165,13 @@ def validate_artifact(artifact: object, version: str, tag: str | None, status: s
         and github_release is not None
         and github_release.fullmatch(url)
     )
-    candidate_ok = (
-        provenance == "github-candidate-bundle-sha256"
-        and isinstance(url, str)
-        and install_url == url
-        and re.fullmatch(
-            rf"https://raw\.githubusercontent\.com/kody-w/openrappter/"
-            rf"[0-9a-f]{{40}}/candidates/[0-9a-f]{{40}}/{re.escape(sha)}\.tar\.gz",
-            url,
-        )
-    )
+    candidate_ok = False
+    if provenance == "github-candidate-bundle-sha256" and isinstance(url, str) and install_url == url:
+        try:
+            parsed_candidate = parse_candidate_url(url)
+            candidate_ok = parsed_candidate["source_commit"] == source_commit and parsed_candidate["sha256"] == sha
+        except CandidateUrlError:
+            candidate_ok = False
     if not (npm_ok or release_ok or candidate_ok):
         raise ManifestError("published artifact URL is not bound to canonical npm version or GitHub release tag")
     return value
@@ -220,7 +216,7 @@ def validate_manifest(
         raise ManifestError("published manifests require reason=null")
     if status != "published" and (not isinstance(reason, str) or not reason.strip()):
         raise ManifestError("non-published manifests require an explicit reason")
-    validate_artifact(value["artifact"], value["version"], tag, status)
+    validate_artifact(value["artifact"], value["version"], tag, status, source["commit"])
     predecessor = None if ring == "nightly" else RINGS[RINGS.index(ring) - 1]
     if value["predecessor"] != predecessor:
         raise ManifestError(f"{ring} predecessor must be {predecessor!r}")

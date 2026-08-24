@@ -7,7 +7,7 @@ import argparse
 import datetime as dt
 import json
 import re
-import urllib.parse
+from candidate_url import build_candidate_url, candidate_id_for_tag, parse_candidate_url
 import sys
 from pathlib import Path
 
@@ -234,7 +234,7 @@ def candidate_fields(provenance: dict, entry: dict, head: str, candidate_commit:
     if kind == "release" and (
         not isinstance(intended_tag, str)
         or intended_tag != f"v{provenance['versions']['npm']}"
-        or entry["id"] != urllib.parse.quote(intended_tag, safe="._-")
+        or entry["id"] != candidate_id_for_tag(intended_tag)
     ):
         raise ObservationError("release candidate tag/version mismatch")
     if kind == "snapshot" and intended_tag is not None:
@@ -244,7 +244,10 @@ def candidate_fields(provenance: dict, entry: dict, head: str, candidate_commit:
     expected_path = f"candidates/{head}/{kind}/{entry['id']}"
     if entry.get("path") != expected_path:
         raise ObservationError("candidate namespace mismatch")
-    url = f"https://raw.githubusercontent.com/kody-w/openrappter/{candidate_commit}/{expected_path}/{sha}.tar.gz"
+    url = build_candidate_url(candidate_commit, head, kind, entry["id"], sha)
+    parsed = parse_candidate_url(url)
+    if parsed["candidate_id"] != entry["id"] or parsed["kind"] != kind:
+        raise ObservationError("candidate URL parser identity mismatch")
     return (
         provenance["versions"]["npm"], kind, intended_tag or "-", url,
         provenance["versions"]["channel"], source_tag or "-",
