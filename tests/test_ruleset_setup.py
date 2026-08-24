@@ -11,6 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RULESET = ROOT / "rulesets" / "release-constitution.json"
 HELPER = ROOT / "scripts" / "apply_release_constitution_ruleset.sh"
+RING_RULESET = ROOT / "rulesets" / "ring-pointer-history.json"
+RING_HELPER = ROOT / "scripts" / "apply_ring_pointer_rulesets.sh"
 
 
 class ReleaseRulesetSetupTests(unittest.TestCase):
@@ -34,6 +36,17 @@ class ReleaseRulesetSetupTests(unittest.TestCase):
 
     def test_helper_is_executable(self):
         self.assertTrue(HELPER.stat().st_mode & stat.S_IXUSR)
+
+    def test_ring_pointer_history_is_append_only_without_bypass(self):
+        value = json.loads(RING_RULESET.read_text())
+        self.assertEqual(value["name"], "Ring Pointer History")
+        self.assertEqual(value["conditions"]["ref_name"]["include"], ["~DEFAULT_BRANCH"])
+        self.assertEqual({rule["type"] for rule in value["rules"]}, {
+            "deletion",
+            "non_fast_forward",
+        })
+        self.assertEqual(value["bypass_actors"], [])
+        self.assertTrue(RING_HELPER.stat().st_mode & stat.S_IXUSR)
 
     def test_existing_ruleset_is_updated_not_duplicated(self):
         with tempfile.TemporaryDirectory() as temporary:

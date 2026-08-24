@@ -14,6 +14,17 @@ class ReceiverWorkflowContractTests(unittest.TestCase):
             '[[ "$REQUESTED_SEQUENCE" =~ ^(0|[1-9][0-9]*)$ ]]',
             workflow,
         )
+        self.assertIn("fetch-depth: 0", workflow)
+        self.assertIn("--target-checkout target", workflow)
+        self.assertIn('if cursor_content="$(gh api ', workflow)
+        rules_check = workflow.index('rules/branches/main')
+        prepare = workflow.index("target_receiver.py prepare")
+        self.assertLess(rules_check, prepare)
+        self.assertIn('{"deletion", "non_fast_forward"}', workflow)
+        self.assertIn(
+            'blob="$(git -C target rev-parse HEAD:.ring/manifest.json)"',
+            workflow,
+        )
 
 
 if __name__ == "__main__":

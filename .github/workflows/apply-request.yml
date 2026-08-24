@@ -15,7 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { ref: main, path: target }
+        with:
+          ref: main
+          path: target
+          fetch-depth: 0
       - uses: actions/checkout@v4
         with:
           repository: kody-w/openrappter-release-train
@@ -32,11 +35,21 @@ jobs:
             echo "::error::requested_sequence must be zero or a positive integer"
             exit 1
           fi
+          gh api "repos/$TARGET_REPOSITORY/rules/branches/main" > target-rules.json
+          python - <<'PY'
+          import json
+          rules = json.load(open("target-rules.json"))
+          required = {"deletion", "non_fast_forward"}
+          present = {rule.get("type") for rule in rules}
+          if not required <= present:
+              raise SystemExit("target main must enforce deletion and non-fast-forward rules")
+          PY
           request_commit="$(git -C authority rev-parse HEAD)"
           finalized="$(python -c 'import json; print(json.load(open("authority/heads/'"$TARGET_RING"'.json"))["sequence"])')"
           applied="$finalized"
-          if gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied-cursor.json?ref=main" \
-              --jq .content 2>/dev/null | base64 --decode > old-applied-cursor.json; then
+          if cursor_content="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/applied-cursor.json?ref=main" \
+              --jq .content 2>/dev/null)"; then
+            printf '%s' "$cursor_content" | base64 --decode > old-applied-cursor.json
             applied="$(python -c 'import json; print(json.load(open("old-applied-cursor.json"))["sequence"])')"
           fi
           if [ "$applied" -gt "$finalized" ]; then
@@ -49,11 +62,12 @@ jobs:
           request_path="$(printf '%s' "$selected" | python -c 'import json,sys; v=json.load(sys.stdin); print(v["path"] if v else "")')"
           [ -n "$request_path" ] || { echo "no unapplied request"; exit 0; }
           cp "authority/$request_path" request.json
-          head="$(gh api "repos/$TARGET_REPOSITORY/commits?path=.ring/manifest.json&per_page=1" --jq '.[0].sha')"
+          head="$(git -C target rev-parse HEAD)"
           PYTHONPATH=authority/scripts python authority/scripts/target_receiver.py prepare \
             --payload request.json --current target/.ring/manifest.json \
             --output proposed.json --target-ring "$TARGET_RING" \
-            --target-repository "$TARGET_REPOSITORY" --current-head "$head"
+            --target-repository "$TARGET_REPOSITORY" --current-head "$head" \
+            --target-checkout target
           git clone --filter=blob:none https://github.com/kody-w/openrappter.git canonical
           previous="$(python -c 'import json; print(json.load(open("request.json"))["target_previous_source_commit"])')"
           proposed="$(python -c 'import json; print(json.load(open("request.json"))["source_commit"])')"
@@ -68,7 +82,7 @@ jobs:
           current_digest="$(python -c 'import json,hashlib; v=json.load(open("target/.ring/manifest.json")); print(hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest())')"
           proposed_digest="$(python -c 'import json; print(json.load(open("request.json"))["target_manifest_sha256"])')"
           if [ "$current_digest" != "$proposed_digest" ]; then
-            blob="$(gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json?ref=main" --jq .sha)"
+            blob="$(git -C target rev-parse HEAD:.ring/manifest.json)"
             content="$(base64 < proposed.json | tr -d '\n')"
             gh api "repos/$TARGET_REPOSITORY/contents/.ring/manifest.json" --method PUT \
               -f "message=ring: apply ordered request" -f content="$content" \
