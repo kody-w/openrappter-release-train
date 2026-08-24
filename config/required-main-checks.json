@@ -1,0 +1,14 @@
+{
+  "schema": "openrappter-required-main-checks/v1",
+  "checks": [
+    "TypeScript (Node 22)",
+    "Python (3.10)",
+    "Python (3.12)",
+    "Dashboard UI",
+    "Runtime parity (golden vectors)",
+    "conformance",
+    "macos-14",
+    "ubuntu-latest",
+    "windows-latest"
+  ]
+}

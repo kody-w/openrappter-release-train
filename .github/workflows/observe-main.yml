@@ -1,0 +1,89 @@
+name: Observe canonical main for nightly
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_kind:
+        type: choice
+        options: [snapshot, release]
+        default: snapshot
+      candidate_id:
+        description: Required for explicit release; optional exact snapshot ID
+        required: false
+        type: string
+  schedule: [{ cron: '7,37 * * * *' }]
+permissions:
+  contents: write
+concurrency:
+  group: observe-openrappter-main
+  cancel-in-progress: false
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(gh api repos/kody-w/openrappter/commits/main --jq .sha)"
+          committed_at="$(gh api repos/kody-w/openrappter/commits/$head --jq .commit.committer.date)"
+          gh api "repos/kody-w/openrappter/commits/$head/check-runs?per_page=100" \
+            -H "Accept: application/vnd.github+json" > checks.json
+          python scripts/observe_main.py verify --checks checks.json --head "$head" \
+            --policy config/required-main-checks.json
+          kind="${{ inputs.candidate_kind || 'snapshot' }}"
+          candidate_id="${{ inputs.candidate_id }}"
+          index_path="candidates/$head/index.json"
+          candidate_commit="$(gh api "repos/kody-w/openrappter/commits?sha=candidates&path=$index_path&per_page=1" --jq '.[0].sha')"
+          printf '%s' "$candidate_commit" | grep -Eq '^[0-9a-f]{40}$'
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$index_path" \
+            -o candidate-index.json
+          select_args=(--index candidate-index.json --kind "$kind")
+          if [ -n "$candidate_id" ]; then select_args+=(--candidate-id "$candidate_id"); fi
+          python scripts/observe_main.py select-candidate "${select_args[@]}" > candidate-entry.json
+          provenance_path="$(python -c 'import json; print(json.load(open("candidate-entry.json"))["provenance_path"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$provenance_path" \
+            -o provenance.json
+          IFS=$'\t' read -r package_version candidate_kind intended_release_tag artifact_url channel_version source_tag <<< "$(
+            python scripts/observe_main.py candidate --provenance provenance.json \
+              --entry candidate-entry.json --head "$head" --candidate-commit "$candidate_commit"
+          )"
+          if [ "$intended_release_tag" = "-" ]; then intended_release_tag=""; fi
+          if [ "$source_tag" = "-" ]; then source_tag=""; fi
+          artifact_sha="$(basename "$artifact_url" .tar.gz)"
+          printf '%s' "$artifact_sha" | grep -Eq '^[0-9a-f]{64}$'
+          curl -fsSL --proto '=https' "$artifact_url" -o candidate.tar.gz
+          echo "$artifact_sha  candidate.tar.gz" | sha256sum -c -
+          mkdir candidate-check
+          tar -xzf candidate.tar.gz -C candidate-check
+          cmp provenance.json candidate-check/provenance.json
+          (cd candidate-check && sha256sum -c SHA256SUMS)
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-release-train/main/heads/nightly.json" \
+            -o target-head.json
+          target_head="$(python -c 'import json; print(json.load(open("target-head.json"))["target_manifest_commit"])')"
+          curl -fsSL --proto '=https' \
+            "https://raw.githubusercontent.com/kody-w/openrappter-nightly/$target_head/.ring/manifest.json" \
+            -o previous.json
+          request_id="$(python scripts/observe_main.py build \
+            --head "$head" --package-version "$package_version" \
+            --committed-at "$committed_at" --artifact-url "$artifact_url" \
+            --artifact-sha256 "$artifact_sha" \
+            --previous-manifest previous.json --target-base-commit "$target_head" \
+            --sequence 1 --release-tag "$intended_release_tag" \
+            --candidate-kind "$candidate_kind" --source-tag "$source_tag" \
+            --channel-version "$channel_version" --output request.json)"
+          # Re-read main immediately before committing the request. A newer
+          # commit must be observed and checked on the next run.
+          test "$(gh api repos/kody-w/openrappter/commits/main --jq .sha)" = "$head"
+          queue="$(python scripts/request_queue.py enqueue --root . --request request.json)"
+          changed="$(printf '%s' "$queue" | python -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
+          if [ "$changed" = false ]; then echo "verified head already queued: $head"; exit 0; fi
+          path="$(printf '%s' "$queue" | python -c 'import json,sys; print(json.load(sys.stdin)["path"])')"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$path" request-index/nightly.json
+          git commit -m "request: nightly verified $head"
+          git push origin HEAD:main

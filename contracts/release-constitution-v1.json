@@ -1,0 +1,30 @@
+{
+  "schema": "openrappter-release-constitution/v1",
+  "check_name": "Release Constitution",
+  "authority_repository": "kody-w/openrappter-release-train",
+  "required_ring_order": ["nightly", "alpha", "canary", "beta"],
+  "distribution_surfaces": [
+    "stable",
+    "git-tag",
+    "github-release",
+    "npm",
+    "pypi",
+    "installer-channel"
+  ],
+  "normal_release": {
+    "receipt_kind": "promotion",
+    "same_exact_commit": true,
+    "same_exact_version": true,
+    "same_exact_artifact_sha256": true,
+    "candidate_bundle_required": true,
+    "no_rebuild_after_beta": true,
+    "all_rings_published": true,
+    "allow_skip": false
+  },
+  "emergency_rollback": {
+    "already_receipted_exact_artifact_only": true,
+    "requires_rollback_receipt": true,
+    "allow_bypass_flag": false
+  },
+  "additional_properties": false
+}
