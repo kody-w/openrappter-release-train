@@ -1,1 +1,12 @@
-{"schema":"openrappter-ring-head/v1","ring":"nightly","sequence":1,"promotion_id":"44512212774063f8fabb716ff1a6cc32f034ee69d1dec82e23888492189a5612","authority_commit":"2605992220cf1dec238fe0798f55452350219c81","receipt_path":"receipts/nightly/44512212774063f8fabb716ff1a6cc32f034ee69d1dec82e23888492189a5612.json","receipt_sha256":"098734975b2b310a70edf056df487e5b57401af65e0ec3e2ac07d9baa3c665a7","target_repository":"kody-w/openrappter-nightly","target_manifest_commit":"96dc6fdd60c6d3ccbf6bf16e1ab1ba4f2a97eb37","target_manifest_sha256":"1c333c29b23eaeebc73611345227f93bf696ff9921264c6d68933075f9b254a1"}
+{
+  "authority_commit": "a80b7dab60f9d8ffd9b608a7d8f9d079652bef7e",
+  "promotion_id": "b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0",
+  "receipt_path": "receipts/nightly/b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0.json",
+  "receipt_sha256": "81df2647cb68df492fff5ee8ae876d6c676f8e240126db6c54d494b1cb4c0e13",
+  "ring": "nightly",
+  "schema": "openrappter-ring-head/v1",
+  "sequence": 2,
+  "target_manifest_commit": "28583c5e45c28a751a09cbd962bd764342f7461b",
+  "target_manifest_sha256": "e05d295a5a3a0da96cbf0aef2d523c72ed69fb9b848a36d7fcdef92c3bb289c4",
+  "target_repository": "kody-w/openrappter-nightly"
+}
