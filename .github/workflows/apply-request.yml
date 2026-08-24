@@ -2,7 +2,10 @@ name: Apply next ordered promotion request
 on:
   workflow_call:
     inputs:
-      requested_sequence: { required: false, type: number, default: 0 }
+      requested_sequence:
+        required: false
+        type: string
+        default: '0'
       target_ring: { required: true, type: string }
       target_repository: { required: true, type: string }
 permissions:
@@ -25,6 +28,10 @@ jobs:
           REQUESTED_SEQUENCE: ${{ inputs.requested_sequence }}
         run: |
           set -euo pipefail
+          if ! [[ "$REQUESTED_SEQUENCE" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::requested_sequence must be zero or a positive integer"
+            exit 1
+          fi
           request_commit="$(git -C authority rev-parse HEAD)"
           finalized="$(python -c 'import json; print(json.load(open("authority/heads/'"$TARGET_RING"'.json"))["sequence"])')"
           applied="$finalized"
