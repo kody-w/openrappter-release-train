@@ -1,1 +1,13 @@
-{"schema":"openrappter-request-index/v1","ring":"nightly","base_sequence":1,"next_sequence":2,"entries":[]}
+{
+  "base_sequence": 1,
+  "entries": [
+    {
+      "path": "requests/nightly/00000000000000000002-b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0.json",
+      "request_id": "b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0",
+      "sequence": 2
+    }
+  ],
+  "next_sequence": 3,
+  "ring": "nightly",
+  "schema": "openrappter-request-index/v1"
+}
