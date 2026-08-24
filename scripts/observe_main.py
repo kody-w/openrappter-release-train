@@ -65,6 +65,8 @@ def nightly_request_id(
     promoted_at: str,
     source_tag: str | None,
     published: bool,
+    intended_release_tag: str | None,
+    channel_version: str | None,
 ) -> str:
     source_identity = {
         "repository": "kody-w/openrappter",
@@ -76,6 +78,8 @@ def nightly_request_id(
         "artifact_sha256": artifact_sha256,
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": promoted_at,
+        "intended_release_tag": intended_release_tag,
+        "channel_version": channel_version,
     }
     seed = {
         "from": None,
@@ -91,6 +95,8 @@ def nightly_request_id(
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": promoted_at,
         "predecessor_manifest_sha256": digest(source_identity),
+        "intended_release_tag": intended_release_tag,
+        "channel_version": channel_version,
     }
     return promotion_id_for_payload(seed)
 
@@ -107,6 +113,8 @@ def build_request(
     sequence: int,
     release_tag: str | None,
     candidate_kind: str,
+    source_tag: str | None,
+    channel_version: str | None,
 ) -> dict:
     validate_manifest(previous_manifest, expected_ring="nightly")
     dt.datetime.fromisoformat(committed_at.replace("Z", "+00:00"))
@@ -117,19 +125,23 @@ def build_request(
         artifact_url=artifact_url,
         artifact_sha256=artifact_sha256,
         promoted_at=committed_at,
-        source_tag=release_tag,
+        source_tag=source_tag,
         published=candidate_kind == "release",
+        intended_release_tag=release_tag,
+        channel_version=channel_version,
     )
     source_identity = {
         "repository": "kody-w/openrappter",
         "commit": head,
-        "tag": release_tag,
+        "tag": source_tag,
         "version": version,
         "artifact_url": artifact_url,
         "install_url": artifact_url if candidate_kind == "release" else None,
         "artifact_sha256": artifact_sha256,
         "artifact_provenance": "github-candidate-bundle-sha256",
         "promoted_at": committed_at,
+        "intended_release_tag": release_tag,
+        "channel_version": channel_version,
     }
     target_manifest = {
         "schema": "openrappter-ring/v1",
@@ -137,7 +149,7 @@ def build_request(
         "source": {
             "repository": "kody-w/openrappter",
             "commit": head,
-            "tag": release_tag,
+            "tag": source_tag,
         },
         "version": version,
         "artifact": {
@@ -152,6 +164,8 @@ def build_request(
         "reason": None if candidate_kind == "release" else "Continuous untagged snapshot; never stable-publishable.",
         "receipt": None,
         "promotion_id": promotion_id,
+        "intended_release_tag": release_tag,
+        "channel_version": channel_version,
     }
     request = {
         "schema": "openrappter-promotion/v1",
@@ -165,7 +179,9 @@ def build_request(
         "target_previous_source_commit": previous_manifest["source"]["commit"],
         "source_repository": "kody-w/openrappter",
         "source_commit": head,
-        "source_tag": release_tag,
+        "source_tag": source_tag,
+        "intended_release_tag": release_tag,
+        "channel_version": channel_version,
         "version": version,
         "artifact_url": artifact_url,
         "install_url": artifact_url if candidate_kind == "release" else None,
@@ -199,7 +215,7 @@ def select_candidate(index: dict, kind: str, candidate_id: str | None) -> dict:
     return max(rows, key=lambda row: (row["source_date_epoch"], row["id"]))
 
 
-def candidate_fields(provenance: dict, entry: dict, head: str, candidate_commit: str) -> tuple[str, str, str, str]:
+def candidate_fields(provenance: dict, entry: dict, head: str, candidate_commit: str) -> tuple[str, str, str, str, str, str]:
     if (
         provenance.get("schema") != "openrappter-candidate-provenance/v1"
         or provenance.get("channel") != "candidate"
@@ -213,20 +229,26 @@ def candidate_fields(provenance: dict, entry: dict, head: str, candidate_commit:
     if not re.fullmatch(r"[0-9a-f]{64}", sha):
         raise ObservationError("candidate bundle SHA-256 is empty or malformed")
     kind = provenance["candidate_kind"]
-    tag = provenance.get("release_tag")
+    intended_tag = provenance.get("intended_release_tag")
+    source_tag = provenance.get("source_tag")
     if kind == "release" and (
-        not isinstance(tag, str)
-        or tag != f"v{provenance['versions']['channel']}"
-        or entry["id"] != urllib.parse.quote(tag, safe="._-")
+        not isinstance(intended_tag, str)
+        or intended_tag != f"v{provenance['versions']['npm']}"
+        or entry["id"] != urllib.parse.quote(intended_tag, safe="._-")
     ):
         raise ObservationError("release candidate tag/version mismatch")
-    if kind == "snapshot" and tag is not None:
+    if kind == "snapshot" and intended_tag is not None:
         raise ObservationError("continuous snapshot must be untagged")
+    if source_tag is not None:
+        raise ObservationError("source_tag must remain null before rings")
     expected_path = f"candidates/{head}/{kind}/{entry['id']}"
     if entry.get("path") != expected_path:
         raise ObservationError("candidate namespace mismatch")
     url = f"https://raw.githubusercontent.com/kody-w/openrappter/{candidate_commit}/{expected_path}/{sha}.tar.gz"
-    return provenance["versions"]["npm"], kind, tag or "-", url
+    return (
+        provenance["versions"]["npm"], kind, intended_tag or "-", url,
+        provenance["versions"]["channel"], source_tag or "-",
+    )
 
 
 def main() -> int:
@@ -240,7 +262,7 @@ def main() -> int:
     for name in (
         "head", "package-version", "committed-at", "artifact-url", "artifact-sha256",
         "previous-manifest", "target-base-commit", "sequence", "release-tag",
-        "candidate-kind", "output",
+        "candidate-kind", "source-tag", "channel-version", "output",
     ):
         build.add_argument(f"--{name}", required=True)
     candidate = sub.add_parser("candidate")
@@ -284,6 +306,8 @@ def main() -> int:
                 sequence=int(args.sequence),
                 release_tag=args.release_tag or None,
                 candidate_kind=args.candidate_kind,
+                source_tag=args.source_tag or None,
+                channel_version=args.channel_version or None,
             )
             Path(args.output).write_bytes(
                 json.dumps(request, indent=2, sort_keys=True).encode() + b"\n"

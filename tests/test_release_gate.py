@@ -18,7 +18,8 @@ class ReleaseConstitutionTests(unittest.TestCase):
             "mode": "normal",
             "source_commit": "a" * 40,
             "source_tag": "v2.0.0",
-            "channel_tag": "v0.1.0-beta.11",
+            "intended_release_tag": "v2.0.0",
+            "channel_version": "0.1.0-beta.11",
             "version": "2.0.0",
             "artifact_url": (
                 f"https://raw.githubusercontent.com/kody-w/openrappter/"
@@ -42,7 +43,7 @@ class ReleaseConstitutionTests(unittest.TestCase):
                 "source": {
                     "repository": "kody-w/openrappter",
                     "commit": self.release["source_commit"],
-                    "tag": self.release["channel_tag"],
+                    "tag": None,
                 },
                 "version": self.release["version"],
                 "artifact": {
@@ -57,6 +58,8 @@ class ReleaseConstitutionTests(unittest.TestCase):
                 "reason": None,
                 "receipt": None,
                 "promotion_id": promotion_id,
+                "intended_release_tag": self.release["intended_release_tag"],
+                "channel_version": self.release["channel_version"],
             }
             receipt = {
                 "schema": "openrappter-promotion-receipt/v1",
@@ -69,7 +72,9 @@ class ReleaseConstitutionTests(unittest.TestCase):
                 "target_manifest_commit": chr(99 + index) * 40,
                 "source_repository": "kody-w/openrappter",
                 "source_commit": self.release["source_commit"],
-                "source_tag": self.release["channel_tag"],
+                "source_tag": None,
+                "intended_release_tag": self.release["intended_release_tag"],
+                "channel_version": self.release["channel_version"],
                 "version": self.release["version"],
                 "artifact_url": self.release["artifact_url"],
                 "install_url": self.release["install_url"],

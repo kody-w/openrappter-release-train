@@ -18,5 +18,8 @@
   "status": "unpublished",
   "reason": "The main snapshot is pinned and checksummed, but no installable nightly package exists yet.",
   "receipt": null,
-  "promotion_id": null
+  "promotion_id": null,
+  "intended_release_tag": null,
+  "channel_version": null,
+  "intended_release_tag": null
 }

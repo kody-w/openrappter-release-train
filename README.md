@@ -58,15 +58,17 @@ heads, and immutable acknowledgement paths instead of copying IDs:
 
 ```sh
 candidate_commit="$(gh api repos/kody-w/openrappter/commits/main --jq .sha)"
+package_version="$(gh api "repos/kody-w/openrappter/contents/typescript/package.json?ref=$candidate_commit" --jq .content | base64 --decode | jq -r .version)"
+intended_release_tag="v$package_version"
 gh workflow run build-candidate.yml -R kody-w/openrappter \
   -f source_commit="$candidate_commit" \
   -f channel_version=0.1.0-beta.11 \
-  -f release_tag=v0.1.0-beta.11 \
+  -f intended_release_tag="$intended_release_tag" \
   -f candidate_kind=release
 gh run watch -R kody-w/openrappter \
   "$(gh run list -R kody-w/openrappter --workflow build-candidate.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 gh workflow run observe-main.yml -R kody-w/openrappter-release-train \
-  -f candidate_kind=release -f candidate_id=v0.1.0-beta.11
+  -f candidate_kind=release -f candidate_id="$intended_release_tag"
 gh run watch -R kody-w/openrappter-release-train \
   "$(gh run list -R kody-w/openrappter-release-train --workflow observe-main.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
 

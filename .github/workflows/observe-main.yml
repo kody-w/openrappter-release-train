@@ -46,11 +46,12 @@ jobs:
           curl -fsSL --proto '=https' \
             "https://raw.githubusercontent.com/kody-w/openrappter/$candidate_commit/$provenance_path" \
             -o provenance.json
-          IFS=$'\t' read -r package_version candidate_kind release_tag artifact_url <<< "$(
+          IFS=$'\t' read -r package_version candidate_kind intended_release_tag artifact_url channel_version source_tag <<< "$(
             python scripts/observe_main.py candidate --provenance provenance.json \
               --entry candidate-entry.json --head "$head" --candidate-commit "$candidate_commit"
           )"
-          if [ "$release_tag" = "-" ]; then release_tag=""; fi
+          if [ "$intended_release_tag" = "-" ]; then intended_release_tag=""; fi
+          if [ "$source_tag" = "-" ]; then source_tag=""; fi
           artifact_sha="$(basename "$artifact_url" .tar.gz)"
           printf '%s' "$artifact_sha" | grep -Eq '^[0-9a-f]{64}$'
           curl -fsSL --proto '=https' "$artifact_url" -o candidate.tar.gz
@@ -71,8 +72,9 @@ jobs:
             --committed-at "$committed_at" --artifact-url "$artifact_url" \
             --artifact-sha256 "$artifact_sha" \
             --previous-manifest previous.json --target-base-commit "$target_head" \
-            --sequence 1 --release-tag "$release_tag" \
-            --candidate-kind "$candidate_kind" --output request.json)"
+            --sequence 1 --release-tag "$intended_release_tag" \
+            --candidate-kind "$candidate_kind" --source-tag "$source_tag" \
+            --channel-version "$channel_version" --output request.json)"
           # Re-read main immediately before committing the request. A newer
           # commit must be observed and checked on the next run.
           test "$(gh api repos/kody-w/openrappter/commits/main --jq .sha)" = "$head"

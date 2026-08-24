@@ -24,6 +24,7 @@ REPOS = {
 TOP_KEYS = {
     "schema", "ring", "source", "version", "artifact", "promoted_at",
     "predecessor", "status", "reason", "receipt", "promotion_id",
+    "intended_release_tag", "channel_version",
 }
 SOURCE_KEYS = {"repository", "commit", "tag"}
 ARTIFACT_KEYS = {"url", "install_url", "sha256", "provenance"}
@@ -41,7 +42,8 @@ PAYLOAD_KEYS = {
     "source_tag", "version", "artifact_url", "install_url",
     "artifact_sha256", "artifact_provenance", "promoted_at",
     "predecessor_manifest_sha256", "target_manifest",
-    "target_manifest_sha256", "sequence",
+    "target_manifest_sha256", "sequence", "intended_release_tag",
+    "channel_version",
 }
 
 
@@ -185,7 +187,13 @@ def validate_manifest(
     expected_ring: str | None = None,
     now: dt.datetime | None = None,
 ) -> dict:
-    value = _closed(manifest, TOP_KEYS, "manifest")
+    if not isinstance(manifest, dict):
+        raise ManifestError("manifest must be an object")
+    legacy_keys = TOP_KEYS - {"intended_release_tag", "channel_version"}
+    if set(manifest) == legacy_keys:
+        value = manifest
+    else:
+        value = _closed(manifest, TOP_KEYS, "manifest")
     if value["schema"] != SCHEMA:
         raise ManifestError(f"schema must be {SCHEMA}")
     ring = value["ring"]
@@ -224,6 +232,13 @@ def validate_manifest(
         not isinstance(promotion_id, str) or not HEX64.fullmatch(promotion_id)
     ):
         raise ManifestError("promotion_id must be null or 64 lowercase hex characters")
+    intended = value.get("intended_release_tag")
+    if intended is not None and (
+        not isinstance(intended, str) or not re.fullmatch(r"v[0-9][0-9A-Za-z.+-]*", intended)
+    ):
+        raise ManifestError("intended_release_tag is malformed")
+    if value.get("channel_version") is not None:
+        parse_semver(value["channel_version"])
     return value
 
 
@@ -283,6 +298,8 @@ def validate_promotion(
         "artifact_provenance": source["artifact"]["provenance"],
         "promoted_at": source["promoted_at"],
         "predecessor_manifest_sha256": digest(source),
+        "intended_release_tag": source.get("intended_release_tag"),
+        "channel_version": source.get("channel_version"),
     }
     promotion_id = digest({
         "from": seed["from"],
@@ -298,6 +315,8 @@ def validate_promotion(
         "artifact_provenance": seed["artifact_provenance"],
         "promoted_at": seed["promoted_at"],
         "predecessor_manifest_sha256": seed["predecessor_manifest_sha256"],
+        "intended_release_tag": seed["intended_release_tag"],
+        "channel_version": seed["channel_version"],
     })
     target_manifest = {
         "schema": SCHEMA,
@@ -311,6 +330,8 @@ def validate_promotion(
         "reason": None,
         "receipt": None,
         "promotion_id": promotion_id,
+        "intended_release_tag": source.get("intended_release_tag"),
+        "channel_version": source.get("channel_version"),
     }
     validate_manifest(target_manifest, expected_ring=target_ring)
     payload = {
@@ -344,6 +365,7 @@ def promotion_id_for_payload(payload: dict) -> str:
             "source_commit", "source_tag", "version", "artifact_url",
             "install_url", "artifact_sha256", "artifact_provenance",
             "promoted_at", "predecessor_manifest_sha256",
+            "intended_release_tag", "channel_version",
         )
     })
 
@@ -378,6 +400,7 @@ def validate_payload(payload: object) -> dict:
         target["source"]["repository"],
         target["source"]["commit"],
         target["source"]["tag"],
+        target["intended_release_tag"], target["channel_version"],
         target["version"],
         target["artifact"]["url"],
         target["artifact"]["install_url"],
@@ -386,6 +409,7 @@ def validate_payload(payload: object) -> dict:
     )
     payload_identity = (
         value["source_repository"], value["source_commit"], value["source_tag"],
+        value.get("intended_release_tag"), value.get("channel_version"),
         value["version"], value["artifact_url"], value["install_url"],
         value["artifact_sha256"], value["artifact_provenance"],
     )
@@ -399,7 +423,8 @@ RECEIPT_KEYS = {
     "target_manifest_sha256", "target_manifest_commit", "source_repository",
     "source_commit", "source_tag", "version", "artifact_url", "install_url",
     "artifact_sha256", "artifact_provenance", "predecessor_manifest_sha256",
-    "emitted_at", "receipt_kind", "sequence",
+    "emitted_at", "receipt_kind", "sequence", "intended_release_tag",
+    "channel_version",
 }
 APPLIED_KEYS = {
     "schema", "request_id", "request_sha256", "request_authority_commit",
@@ -422,7 +447,11 @@ def validate_receipt(
     immutable_manifest: dict,
 ) -> dict:
     if isinstance(receipt, dict) and receipt.get("receipt_kind") == "bootstrap" and "sequence" not in receipt:
-        value = _closed(receipt, RECEIPT_KEYS - {"sequence"}, "legacy bootstrap receipt")
+        value = _closed(
+            receipt,
+            RECEIPT_KEYS - {"sequence", "intended_release_tag", "channel_version"},
+            "legacy bootstrap receipt",
+        )
     else:
         value = _closed(receipt, RECEIPT_KEYS, "receipt")
     if value["schema"] != "openrappter-promotion-receipt/v1":
@@ -441,12 +470,15 @@ def validate_receipt(
         raise ManifestError("receipt promotion id mismatch")
     identity = (
         value["source_repository"], value["source_commit"], value["source_tag"],
+        value.get("intended_release_tag"), value.get("channel_version"),
         value["version"], value["artifact_url"], value["install_url"],
         value["artifact_sha256"], value["artifact_provenance"],
     )
     manifest_identity = (
         current_manifest["source"]["repository"], current_manifest["source"]["commit"],
-        current_manifest["source"]["tag"], current_manifest["version"],
+        current_manifest["source"]["tag"],
+        current_manifest.get("intended_release_tag"), current_manifest.get("channel_version"),
+        current_manifest["version"],
         current_manifest["artifact"]["url"], current_manifest["artifact"]["install_url"],
         current_manifest["artifact"]["sha256"], current_manifest["artifact"]["provenance"],
     )
@@ -524,7 +556,7 @@ def make_head(
         if previous_receipt is None or checkout is None:
             raise ManifestError("advancing authority head requires previous receipt and canonical checkout")
         previous_keys = (
-            RECEIPT_KEYS - {"sequence"}
+            RECEIPT_KEYS - {"sequence", "intended_release_tag", "channel_version"}
             if isinstance(previous_receipt, dict)
             and previous_receipt.get("receipt_kind") == "bootstrap"
             and "sequence" not in previous_receipt
@@ -566,6 +598,8 @@ def make_receipt(
         "source_repository": payload["source_repository"],
         "source_commit": payload["source_commit"],
         "source_tag": payload["source_tag"],
+        "intended_release_tag": payload["intended_release_tag"],
+        "channel_version": payload["channel_version"],
         "version": payload["version"],
         "artifact_url": payload["artifact_url"],
         "install_url": payload["install_url"],

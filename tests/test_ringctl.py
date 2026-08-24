@@ -80,6 +80,8 @@ class RingAuthorityTests(unittest.TestCase):
             "reason": None,
             "receipt": None,
             "promotion_id": "b" * 64,
+            "intended_release_tag": "v2.0.0",
+            "channel_version": "0.1.0-beta.11",
         }
         self.previous = {
             **self.source,

@@ -14,8 +14,10 @@
     "predecessor",
     "status",
     "reason",
-    "receipt"
-    ,"promotion_id"
+    "receipt",
+    "promotion_id",
+    "intended_release_tag",
+    "channel_version"
   ],
   "properties": {
     "schema": { "const": "openrappter-ring/v1" },
@@ -91,6 +93,18 @@
       "oneOf": [
         { "type": "null" },
         { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      ]
+    },
+    "intended_release_tag": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^v[0-9][0-9A-Za-z.+-]*$" }
+      ]
+    },
+    "channel_version": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$" }
       ]
     }
   }

@@ -71,6 +71,8 @@ class ObserveMainTests(unittest.TestCase):
             "sequence": 1,
             "release_tag": "v2.0.0",
             "candidate_kind": "release",
+            "source_tag": None,
+            "channel_version": "0.1.0-beta.11",
         }
         first = build_request(**kwargs)
         second = build_request(**kwargs)
@@ -82,8 +84,10 @@ class ObserveMainTests(unittest.TestCase):
             artifact_url=kwargs["artifact_url"],
             artifact_sha256="c" * 64,
             promoted_at="2026-08-23T20:00:00Z",
-            source_tag="v2.0.0",
+            source_tag=None,
             published=True,
+            intended_release_tag="v2.0.0",
+            channel_version="0.1.0-beta.11",
         )
         self.assertEqual(first["promotion_id"], expected)
         self.assertIsNone(first["from"])
@@ -96,6 +100,7 @@ class ObserveMainTests(unittest.TestCase):
             "promoted_at", "predecessor_manifest_sha256", "target_manifest",
             "target_manifest_sha256",
             "sequence",
+            "intended_release_tag", "channel_version",
         })
         self.assertEqual(first["target_previous_manifest_sha256"], digest(self.previous))
         self.assertEqual(first["target_previous_source_commit"], self.previous["source"]["commit"])
@@ -124,7 +129,8 @@ class ObserveMainTests(unittest.TestCase):
                 "stable": False,
                 "candidate_kind": "release",
                 "candidate_id": "v2.0.0",
-                "release_tag": "v2.0.0",
+                "source_tag": None,
+                "intended_release_tag": "v2.0.0",
                 "source_commit": self.head,
                 "versions": {"npm": "2.0.0", "pypi": "2.0.0", "runtime": "2.0.0", "channel": "2.0.0"},
             }
@@ -141,9 +147,10 @@ class ObserveMainTests(unittest.TestCase):
                 text=True, capture_output=True, check=True,
             )
             fields = result.stdout.rstrip("\n").split("\t")
-            self.assertEqual(len(fields), 4)
+            self.assertEqual(len(fields), 6)
             self.assertEqual(fields[:3], ["2.0.0", "release", "v2.0.0"])
             self.assertRegex(fields[3], rf"/{'c' * 64}\.tar\.gz$")
+            self.assertEqual(fields[4:], ["2.0.0", "-"])
         finally:
             __import__("shutil").rmtree(work, ignore_errors=True)
 
@@ -154,7 +161,8 @@ class ObserveMainTests(unittest.TestCase):
             "stable": False,
             "candidate_kind": "snapshot",
             "candidate_id": "snapshot-1",
-            "release_tag": None,
+            "source_tag": None,
+            "intended_release_tag": None,
             "source_commit": self.head,
             "versions": {"npm": "2.0.0", "pypi": "2.0.0", "runtime": "2.0.0", "channel": "snapshot"},
         }

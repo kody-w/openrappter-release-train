@@ -23,7 +23,7 @@ RELEASE_KEYS = {
     "schema", "mode", "source_commit", "source_tag", "version",
     "artifact_url", "install_url", "artifact_sha256",
     "artifact_provenance", "rollback_receipt",
-    "channel_tag",
+    "intended_release_tag", "channel_version",
 }
 
 
@@ -91,7 +91,8 @@ def validate_chain(
     expected_identity = _identity(value)
     previous_manifest: dict | None = None
     previous_time: dt.datetime | None = None
-    channel_tag = value["channel_tag"]
+    intended_tag = value["intended_release_tag"]
+    channel_version = value["channel_version"]
     seen_ids: set[str] = set()
     for ring, item in zip(ORDER, chain):
         if set(item) != {
@@ -119,10 +120,19 @@ def validate_chain(
             raise ConstitutionError(str(exc)) from exc
         if receipt["receipt_kind"] != "promotion":
             raise ConstitutionError(f"{ring} is not finalized by a promotion receipt")
-        if not channel_tag:
-            channel_tag = receipt["source_tag"]
-        if receipt["source_tag"] != channel_tag:
-            raise ConstitutionError(f"{ring} channel tag identity mismatch")
+        if receipt.get("source_tag") is not None or manifest["source"]["tag"] is not None:
+            raise ConstitutionError(f"{ring} source tag was created before stable finalization")
+        if not intended_tag:
+            intended_tag = receipt["intended_release_tag"]
+        if not channel_version:
+            channel_version = receipt["channel_version"]
+        if (
+            receipt["intended_release_tag"] != intended_tag
+            or receipt["channel_version"] != channel_version
+            or manifest["intended_release_tag"] != intended_tag
+            or manifest["channel_version"] != channel_version
+        ):
+            raise ConstitutionError(f"{ring} intended tag/channel identity mismatch")
         if manifest["status"] != "published":
             raise ConstitutionError(f"{ring} is pending or disabled")
         if _identity({
@@ -229,7 +239,8 @@ def discover_artifact(release: dict) -> dict:
     ):
         raise ConstitutionError("latest finalized beta artifact does not match release identity")
     result = dict(release)
-    result["channel_tag"] = receipt["source_tag"]
+    result["intended_release_tag"] = receipt["intended_release_tag"]
+    result["channel_version"] = receipt["channel_version"]
     for target, source in (
         ("artifact_url", "artifact_url"),
         ("install_url", "install_url"),
@@ -262,9 +273,11 @@ def verify_candidate_bytes(release: dict, local_dir: Path) -> None:
         provenance = json.loads((extracted / "provenance.json").read_text())
         if (
             provenance.get("candidate_kind") != "release"
-            or provenance.get("release_tag") != release["channel_tag"]
+            or provenance.get("source_tag") is not None
+            or provenance.get("intended_release_tag") != release["intended_release_tag"]
             or provenance.get("source_commit") != release["source_commit"]
             or provenance.get("versions", {}).get("npm") != release["version"]
+            or provenance.get("versions", {}).get("channel") != release["channel_version"]
         ):
             raise ConstitutionError("snapshot or mismatched candidate cannot be distributed")
         matched = []
@@ -341,10 +354,11 @@ def verify_pages(
         if (
             provenance["schema"] != "openrappter-candidate-provenance/v1"
             or provenance["candidate_kind"] != "release"
-            or provenance["release_tag"] != receipt["source_tag"]
+            or provenance["source_tag"] is not None
+            or provenance["intended_release_tag"] != receipt["intended_release_tag"]
             or provenance["source_commit"] != receipt["source_commit"]
             or provenance["versions"]["npm"] != receipt["version"]
-            or provenance["versions"]["channel"] != receipt["source_tag"].removeprefix("v")
+            or provenance["versions"]["channel"] != receipt["channel_version"]
         ):
             raise ConstitutionError("candidate provenance/tag identity mismatch")
         for name in ("install.sh", "install.ps1"):
