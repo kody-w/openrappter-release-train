@@ -22,10 +22,17 @@ class CandidateUrlTests(unittest.TestCase):
             valid.replace("raw.githubusercontent.com","RAW.GITHUBUSERCONTENT.COM"),
             valid.replace("raw.githubusercontent.com","raw.githubusercontent.com:443"),
             valid.replace("https://","https://user@"),valid.replace("/kody-w/openrappter/","/other/openrappter/"),
+            valid.replace("/openrappter/", "/wrong/"),
+            valid.replace(f"/{self.fixture['ref']}/", f"/{'B' * 40}/"),
+            valid.replace(f"/{self.fixture['source_commit']}/", f"/{'A' * 40}/"),
             valid.replace("/release/","/beta/"),valid.replace("/tag-djEuMTMuMA/","/../"),
             valid.replace("/tag-djEuMTMuMA/","/%2e%2e/"),valid.replace("/tag-djEuMTMuMA/","/täg/"),
-            valid.replace("/tag-djEuMTMuMA/","/a/b/"),valid.replace(".tar.gz","/extra.tar.gz"),
+            valid.replace("/tag-djEuMTMuMA/","/a/b/"),valid.replace("/tag-djEuMTMuMA/", "/-leading/"),
+            valid.replace("/tag-djEuMTMuMA/", f"/{'a' * 129}/"),
+            valid.replace(".tar.gz","/extra.tar.gz"), valid.replace("/candidates/", "//candidates/"),
             valid.replace(self.fixture["ref"],"main"),valid.replace(self.fixture["sha256"],"d"*63),
+            valid.replace(self.fixture["sha256"], self.fixture["sha256"].upper()),
+            valid + "\n",
         ]
         for value in bad:
             with self.subTest(value=value),self.assertRaises((CandidateUrlError,ValueError)):

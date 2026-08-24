@@ -22,7 +22,11 @@ def validate_candidate_id(value: str) -> str:
     return value
 
 def parse_candidate_url(url: str) -> dict:
-    if not isinstance(url, str) or not url.startswith("https://raw.githubusercontent.com/"):
+    if (
+        not isinstance(url, str)
+        or not re.fullmatch(r"[\x20-\x7e]+", url)
+        or not url.startswith("https://raw.githubusercontent.com/")
+    ):
         raise CandidateUrlError("candidate URL origin must use the exact allowlisted spelling")
     try:
         parsed = urlsplit(url)
