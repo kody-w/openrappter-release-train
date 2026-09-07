@@ -1,0 +1,22 @@
+{
+  "artifact_provenance": "github-candidate-bundle-sha256",
+  "artifact_sha256": "e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8",
+  "artifact_url": "https://raw.githubusercontent.com/kody-w/openrappter/1441d8bf8227f4d9a20ac10cd4609f4a99496c7d/candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8.tar.gz",
+  "channel_version": "0.1.0-beta.11",
+  "emitted_at": "2026-09-07T18:03:02Z",
+  "install_url": "https://raw.githubusercontent.com/kody-w/openrappter/1441d8bf8227f4d9a20ac10cd4609f4a99496c7d/candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8.tar.gz",
+  "intended_release_tag": "v1.13.1",
+  "predecessor_manifest_sha256": "2a05190e1f698c5d665281d6d17830e3fcc42eb0b433a9b215ac7044c98c8f60",
+  "promotion_id": "4237cdc9eac67f975563440daa571e9c48b81fcc75c6e2679c5cf80050066d4c",
+  "receipt_kind": "promotion",
+  "schema": "openrappter-promotion-receipt/v1",
+  "sequence": 2,
+  "source_commit": "2241544be7229e9c480c983e569a712280f1bd0a",
+  "source_repository": "kody-w/openrappter",
+  "source_tag": null,
+  "target_manifest_commit": "28b1650dbc033a35fb99a03dda82c4fa5c5665b4",
+  "target_manifest_sha256": "f389c60277afe931706ecb92eef3207396eb8bbf4bd86027e6076668708079d4",
+  "target_repository": "kody-w/openrappter-beta",
+  "target_ring": "beta",
+  "version": "1.13.1"
+}
