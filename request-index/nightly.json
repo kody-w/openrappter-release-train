@@ -5,9 +5,14 @@
       "path": "requests/nightly/00000000000000000002-b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0.json",
       "request_id": "b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0",
       "sequence": 2
+    },
+    {
+      "path": "requests/nightly/00000000000000000003-284cb104c50101d61d8d1d5a8ce0b74039d9a30f7bbce7b15d2fb4b71cca3689.json",
+      "request_id": "284cb104c50101d61d8d1d5a8ce0b74039d9a30f7bbce7b15d2fb4b71cca3689",
+      "sequence": 3
     }
   ],
-  "next_sequence": 3,
+  "next_sequence": 4,
   "ring": "nightly",
   "schema": "openrappter-request-index/v1"
 }
