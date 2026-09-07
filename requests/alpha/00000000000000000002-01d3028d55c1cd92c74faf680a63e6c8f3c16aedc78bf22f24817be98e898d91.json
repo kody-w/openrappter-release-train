@@ -1,0 +1,48 @@
+{
+  "artifact_provenance": "github-candidate-bundle-sha256",
+  "artifact_sha256": "e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8",
+  "artifact_url": "https://raw.githubusercontent.com/kody-w/openrappter/1441d8bf8227f4d9a20ac10cd4609f4a99496c7d/candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8.tar.gz",
+  "channel_version": "0.1.0-beta.11",
+  "from": "nightly",
+  "install_url": "https://raw.githubusercontent.com/kody-w/openrappter/1441d8bf8227f4d9a20ac10cd4609f4a99496c7d/candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8.tar.gz",
+  "intended_release_tag": "v1.13.1",
+  "predecessor_manifest_sha256": "482e00ae3774253dd379d380565becbb70acdcb0fdc30a31cf929e2a883e7096",
+  "promoted_at": "2026-09-07T17:38:06Z",
+  "promotion_id": "01d3028d55c1cd92c74faf680a63e6c8f3c16aedc78bf22f24817be98e898d91",
+  "schema": "openrappter-promotion/v1",
+  "sequence": 2,
+  "source_commit": "2241544be7229e9c480c983e569a712280f1bd0a",
+  "source_repository": "kody-w/openrappter",
+  "source_tag": null,
+  "target_base_commit": "bd889ca4759e33db247007fd55c814f91407a80d",
+  "target_manifest": {
+    "artifact": {
+      "install_url": "https://raw.githubusercontent.com/kody-w/openrappter/1441d8bf8227f4d9a20ac10cd4609f4a99496c7d/candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8.tar.gz",
+      "provenance": "github-candidate-bundle-sha256",
+      "sha256": "e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8",
+      "url": "https://raw.githubusercontent.com/kody-w/openrappter/1441d8bf8227f4d9a20ac10cd4609f4a99496c7d/candidates/2241544be7229e9c480c983e569a712280f1bd0a/release/tag-djEuMTMuMQ/e65da0b8faabbb735a7e152876519af31f56b94e9bc30a015f9767828b7c16b8.tar.gz"
+    },
+    "channel_version": "0.1.0-beta.11",
+    "intended_release_tag": "v1.13.1",
+    "predecessor": "nightly",
+    "promoted_at": "2026-09-07T17:38:06Z",
+    "promotion_id": "01d3028d55c1cd92c74faf680a63e6c8f3c16aedc78bf22f24817be98e898d91",
+    "reason": null,
+    "receipt": null,
+    "ring": "alpha",
+    "schema": "openrappter-ring/v1",
+    "source": {
+      "commit": "2241544be7229e9c480c983e569a712280f1bd0a",
+      "repository": "kody-w/openrappter",
+      "tag": null
+    },
+    "status": "published",
+    "version": "1.13.1"
+  },
+  "target_manifest_sha256": "7556edab1502294b47958d8b4e98c008d69830474a9808c4ded1998ba03bce5c",
+  "target_previous_manifest_sha256": "f432528743925351da7734745ea3de45f089970b16ed25fb04173a2447fd2385",
+  "target_previous_source_commit": "9913ca2e5237c44620f5422644cbe6060f2c8c18",
+  "target_repository": "kody-w/openrappter-alpha",
+  "to": "alpha",
+  "version": "1.13.1"
+}
