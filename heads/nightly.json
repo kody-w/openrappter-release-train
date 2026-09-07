@@ -1,12 +1,12 @@
 {
-  "authority_commit": "a80b7dab60f9d8ffd9b608a7d8f9d079652bef7e",
-  "promotion_id": "b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0",
-  "receipt_path": "receipts/nightly/b39e88d29d238cc0d688aa8294db766ac4f357db6593b38b5a75fbdb347329a0.json",
-  "receipt_sha256": "81df2647cb68df492fff5ee8ae876d6c676f8e240126db6c54d494b1cb4c0e13",
+  "authority_commit": "ee734f12fac6a745bc2460c83dc653c20d096504",
+  "promotion_id": "284cb104c50101d61d8d1d5a8ce0b74039d9a30f7bbce7b15d2fb4b71cca3689",
+  "receipt_path": "receipts/nightly/284cb104c50101d61d8d1d5a8ce0b74039d9a30f7bbce7b15d2fb4b71cca3689.json",
+  "receipt_sha256": "43b1c958fc3986f30d2e4a2a0b31581455d92b47e0f9af2473bec5a9260c6191",
   "ring": "nightly",
   "schema": "openrappter-ring-head/v1",
-  "sequence": 2,
-  "target_manifest_commit": "28583c5e45c28a751a09cbd962bd764342f7461b",
-  "target_manifest_sha256": "e05d295a5a3a0da96cbf0aef2d523c72ed69fb9b848a36d7fcdef92c3bb289c4",
+  "sequence": 3,
+  "target_manifest_commit": "d010d289bebe47072a884860356d45463f35688f",
+  "target_manifest_sha256": "482e00ae3774253dd379d380565becbb70acdcb0fdc30a31cf929e2a883e7096",
   "target_repository": "kody-w/openrappter-nightly"
 }
