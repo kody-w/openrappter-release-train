@@ -1,1 +1,12 @@
-{"schema":"openrappter-ring-head/v1","ring":"canary","sequence":1,"promotion_id":"b4b0ff0fa4bbb79b637f8682966ab54942bd3060798beb3c397e9b350392061a","authority_commit":"2605992220cf1dec238fe0798f55452350219c81","receipt_path":"receipts/canary/b4b0ff0fa4bbb79b637f8682966ab54942bd3060798beb3c397e9b350392061a.json","receipt_sha256":"9f7d2e5f1052906e9a592bdf9e58d4bdf31b10b69198890e19a991833019b9b3","target_repository":"kody-w/openrappter-canary","target_manifest_commit":"d7d144576c5459a4491341336cbb5622c21a8cad","target_manifest_sha256":"14c318bbf739e5bb8b45e06b761fd51d91aa6f8d70c912797dd02012a700f378"}
+{
+  "authority_commit": "0e36a40d45bded4d305ce7cea5fe783a4663631a",
+  "promotion_id": "ab5b65acc96f6502f41926bdd560a9474bae8a6691850881191daddcc89a60c7",
+  "receipt_path": "receipts/canary/ab5b65acc96f6502f41926bdd560a9474bae8a6691850881191daddcc89a60c7.json",
+  "receipt_sha256": "e6908dbeb53438bb7f7fdc50d4c6a107bf196c73f608de926db29dacc5708ae5",
+  "ring": "canary",
+  "schema": "openrappter-ring-head/v1",
+  "sequence": 2,
+  "target_manifest_commit": "1da88f16ebb86fc3facbbccf1183344565f6f64a",
+  "target_manifest_sha256": "2a05190e1f698c5d665281d6d17830e3fcc42eb0b433a9b215ac7044c98c8f60",
+  "target_repository": "kody-w/openrappter-canary"
+}
