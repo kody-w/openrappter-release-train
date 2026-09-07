@@ -1,1 +1,13 @@
-{"schema":"openrappter-request-index/v1","ring":"canary","base_sequence":1,"next_sequence":2,"entries":[]}
+{
+  "base_sequence": 1,
+  "entries": [
+    {
+      "path": "requests/canary/00000000000000000002-ab5b65acc96f6502f41926bdd560a9474bae8a6691850881191daddcc89a60c7.json",
+      "request_id": "ab5b65acc96f6502f41926bdd560a9474bae8a6691850881191daddcc89a60c7",
+      "sequence": 2
+    }
+  ],
+  "next_sequence": 3,
+  "ring": "canary",
+  "schema": "openrappter-request-index/v1"
+}
