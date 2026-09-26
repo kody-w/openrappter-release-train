@@ -1,5 +1,9 @@
 # OpenRappter Release Train
 
+<!-- rapp1:network-header:start -->
+[![RAPP/1](https://kody-w.github.io/rapp-hive-public/portfolio/badges/openrappter-release-train.svg)](https://github.com/kody-w/rapp-hive-public/blob/main/portfolio/repos/openrappter-release-train.md) · **New to RAPP?** [Start here: get your Brainstem →](https://github.com/kody-w/rapp-installer#start-here)
+<!-- rapp1:network-header:end -->
+
 This repository is the authority for five maintained **pointers**, not five
 copies of OpenRappter:
 
